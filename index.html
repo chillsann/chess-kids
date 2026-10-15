@@ -119,7 +119,7 @@ function inB(r,c){return r>=0&&r<8&&c>=0&&c<8;}
 function colorOf(p){return p?p[0]:null;}
 function typeOf(p){return p?p[1]:null;}
 function isAttacked(st,r,c,by){const b=st.board;
-  const adv=by===W?-1:1;
+  const adv=by===W?1:-1;
   for(const dc of[-1,1]){const pr=r+adv,pc=c+dc;if(inB(pr,pc)&&b[pr][pc]===by+'p')return true;}
   for(const[dr,dc]of DIR.n){if(inB(r+dr,c+dc)&&b[r+dr][c+dc]===by+'n')return true;}
   for(const[dr,dc]of DIR.k){if(inB(r+dr,c+dc)&&b[r+dr][c+dc]===by+'k')return true;}
@@ -256,12 +256,26 @@ function doMove(m){
   if(m.promo)document.getElementById('tips').textContent='哇！小兵升变成皇后啦，太棒了！';
   refreshMoves();checkGameEnd();
 }
+function posKey(st){return st.board.map(row=>row.map(p=>p||'.').join('')).join('/')+'|'+st.turn+'|'+
+  (st.castle.wK?'K':'')+(st.castle.wQ?'Q':'')+(st.castle.bK?'k':'')+(st.castle.bQ?'q':'')+'|'+(st.ep?st.ep.join(''):'-');}
+function drawReason(){
+  const nonK=[];
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++){const p=state.board[r][c];if(p&&typeOf(p)!=='k')nonK.push(typeOf(p));}
+  if(nonK.filter(t=>t!=='n'&&t!=='b').length===0&&nonK.length<=1)return '平局啦（子力不足，谁也赢不了）～';
+  const st={board:state.board.map(row=>row.slice()),turn:state.turn,castle:{...state.castle},ep:state.ep};
+  const counts={};counts[posKey(st)]=1;
+  for(let i=history.length-1;i>=0;i--){unapplyMove(st,history[i].u);
+    const k=posKey(st);counts[k]=(counts[k]||0)+1;
+    if(counts[k]>=3)return '平局啦（同样的局面出现三次，和棋）～';}
+  return null;}
 function checkGameEnd(){
   const legal=legalMoves(state);
   if(legal.length===0){
     if(inCheck(state,state.turn)){const winner=state.turn===W?'黑方':'白方';
       gameOver='太棒啦！'+winner+'获胜（将杀）！点“新的一局”再玩～';}
-    else gameOver='平局啦（逼和），谁也没将死谁，再开一局吧！';}
+    else gameOver='平局啦（逼和），谁也没将死谁，再开一局吧！';
+    return;}
+  const d=drawReason();if(d)gameOver=d;
 }
 function afterHuman(){
   if(gameOver){document.getElementById('status').textContent=gameOver;return;}
