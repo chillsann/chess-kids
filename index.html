@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>国际象棋乐园</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+body{font-family:"PingFang SC","Microsoft YaHei","Comic Sans MS",sans-serif;
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:linear-gradient(135deg,#ffd6e8 0%,#cdeffd 45%,#d9f7d8 100%);background-size:300% 300%;
+  animation:bg 18s ease infinite;color:#5b4636;}
+@keyframes bg{0%{background-position:0 50%}50%{background-position:100% 50%}100%{background-position:0 50%}}
+.wrap{display:flex;flex-wrap:wrap;gap:22px;background:rgba(255,255,255,.65);backdrop-filter:blur(6px);
+  padding:26px;border-radius:30px;box-shadow:0 18px 45px rgba(150,120,150,.28);max-width:960px;}
+h1{width:100%;text-align:center;font-size:30px;color:#ff7eb3;text-shadow:2px 2px 0 #fff;margin-bottom:4px;}
+.sub{width:100%;text-align:center;font-size:14px;color:#8a7666;margin-bottom:8px;}
+.board-area{display:flex;flex-direction:column;gap:12px;align-items:center;}
+.board{display:grid;grid-template-columns:repeat(8,1fr);width:min(86vw,460px);aspect-ratio:1;
+  border:6px solid #fff;border-radius:18px;overflow:hidden;box-shadow:0 10px 24px rgba(120,100,120,.3);}
+.sq{position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  font-size:clamp(28px,7.2vw,44px);user-select:none;transition:background .15s;}
+.sq.light{background:#ffeccb;} .sq.dark{background:#f4b183;}
+.sq.sel{background:#b6f5b0!important;box-shadow:inset 0 0 0 4px #4ecb71;}
+.sq.last{background:#fff29a!important;}
+.piece{filter:drop-shadow(0 2px 2px rgba(0,0,0,.28));transition:transform .12s;line-height:1;}
+.sq:hover .piece{transform:scale(1.12) translateY(-2px);}
+.piece.w{color:#fff;text-shadow:0 0 2px #b98b5e,0 2px 0 #c79a6b;}
+.piece.b{color:#4a3b52;text-shadow:0 0 2px #000;}
+.dot{position:absolute;width:26%;height:26%;border-radius:50%;background:#5fd06a;opacity:.72;}
+.ring{position:absolute;width:82%;height:82%;border-radius:50%;border:5px solid #ff6f9c;opacity:.85;}
+.chk{animation:shake .5s infinite;background:#ffb3b3!important;}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+.side{display:flex;flex-direction:column;gap:14px;min-width:240px;flex:1;}
+.card{background:#fff;border-radius:18px;padding:14px 16px;box-shadow:0 6px 16px rgba(150,120,150,.18);}
+.card h3{font-size:15px;color:#ff8fb0;margin-bottom:8px;}
+#status{font-size:17px;font-weight:bold;color:#4a90d9;text-align:center;min-height:24px;}
+.hint{font-size:13px;color:#7a6a5a;line-height:1.6;}
+.btns{display:flex;flex-wrap:wrap;gap:8px;}
+button{border:none;border-radius:14px;padding:9px 12px;font-size:13px;cursor:pointer;font-family:inherit;
+  background:#ffb3d1;color:#fff;box-shadow:0 4px 0 #e08bb0;transition:transform .08s;}
+button:active{transform:translateY(3px);box-shadow:0 1px 0 #e08bb0;}
+button.alt{background:#8fd3f4;box-shadow:0 4px 0 #5aa9cc;}
+select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inherit;font-size:13px;color:#5b4636;background:#fff;}
+.caps{display:flex;justify-content:space-between;font-size:20px;min-height:28px;}
+.mat{font-size:13px;color:#4a90d9;font-weight:bold;}
+#moves{font-size:12px;color:#7a6a5a;max-height:120px;overflow:auto;line-height:1.7;}
+#tips{font-size:13px;color:#c56a8b;line-height:1.7;}
+.tag{display:inline-block;background:#fff0f5;border-radius:8px;padding:2px 6px;margin:2px;font-size:12px;color:#b56488;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>♞ 国际象棋乐园 ♞</h1>
+  <div class="sub">点一下棋子，再点绿色圆点就能走啦～</div>
+  <div class="board-area">
+    <div id="status">轮到白方（你）走</div>
+    <div class="board" id="board"></div>
+    <div class="btns">
+      <button class="alt" onclick="newGame()">新的一局</button>
+      <button onclick="undo()">悔棋</button>
+      <button class="alt" onclick="hint()">给个提示</button>
+      <button onclick="flipBoard()">翻转棋盘</button>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card">
+      <h3>玩法设置</h3>
+      <div class="btns">
+        <select id="mode">
+          <option value="2p">和朋友一起玩</option>
+          <option value="ai" selected>和电脑玩</option>
+        </select>
+        <select id="level">
+          <option value="1">电脑：简单</option>
+          <option value="2">电脑：中等</option>
+          <option value="3">电脑：厉害</option>
+        </select>
+      </div>
+    </div>
+    <div class="card">
+      <h3>吃子乐园</h3>
+      <div class="caps"><span id="capW"></span><span id="capB"></span></div>
+      <div class="mat" id="mat"></div>
+    </div>
+    <div class="card">
+      <h3>小知识</h3>
+      <div id="tips" class="hint">欢迎来到乐园！先点一个白色棋子，绿色圆点是它能去的地方，粉色圈圈表示可以吃掉对方的棋子哦。</div>
+    </div>
+    <div class="card">
+      <h3>最近走了啥</h3>
+      <div id="moves"></div>
+    </div>
+    <div class="card">
+      <h3>棋子怎么走呀？</h3>
+      <div class="hint">
+        <span class="tag">♙兵</span>向前走一格，第一步可走两格，斜着吃子，走到底线能变皇后！<br>
+        <span class="tag">♖车</span>直直地走，横竖都行，走多远都可以。<br>
+        <span class="tag">♘马</span>走“L”形，还会跳过别人。<br>
+        <span class="tag">♗象</span>斜着走，走得远远的。<br>
+        <span class="tag">♕后</span>最厉害！横竖斜都能走。<br>
+        <span class="tag">♔王</span>一次只走一格，千万别被吃掉！
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const W='w',B='b';
+const UNI={wk:'♔',wq:'♕',wr:'♖',wb:'♗',wn:'♘',wp:'♙',bk:'♚',bq:'♛',br:'♜',bb:'♝',bn:'♞',bp:'♟'};
+const VAL={p:1,n:3,b:3,r:5,q:9,k:0};
+const DIR={n:[[1,2],[2,1],[2,-1],[1,-2],[-1,-2],[-2,-1],[-2,1],[-1,2]],
+  b:[[1,1],[1,-1],[-1,1],[-1,-1]], r:[[1,0],[-1,0],[0,1],[0,-1]]};
+DIR.q=DIR.b.concat(DIR.r); DIR.k=DIR.q;
+function newBoard(){const b=Array(8).fill(0).map(()=>Array(8).fill(null));
+  const back=['r','n','b','q','k','b','n','r'];
+  for(let c=0;c<8;c++){b[0][c]=B+back[c];b[1][c]=B+'p';b[6][c]=W+'p';b[7][c]=W+back[c];}return b;}
+function freshState(){return{board:newBoard(),turn:W,castle:{wK:true,wQ:true,bK:true,bQ:true},ep:null};}
+function inB(r,c){return r>=0&&r<8&&c>=0&&c<8;}
+function colorOf(p){return p?p[0]:null;}
+function typeOf(p){return p?p[1]:null;}
+function isAttacked(st,r,c,by){const b=st.board;
+  const adv=by===W?-1:1;
+  for(const dc of[-1,1]){const pr=r+adv,pc=c+dc;if(inB(pr,pc)&&b[pr][pc]===by+'p')return true;}
+  for(const[dr,dc]of DIR.n){if(inB(r+dr,c+dc)&&b[r+dr][c+dc]===by+'n')return true;}
+  for(const[dr,dc]of DIR.k){if(inB(r+dr,c+dc)&&b[r+dr][c+dc]===by+'k')return true;}
+  for(const t of['b','r','q']){for(const[dr,dc]of DIR[t]){let rr=r+dr,cc=c+dc;while(inB(rr,cc)){const p=b[rr][cc];if(p){if(p===by+t)return true;break;}rr+=dr;cc+=dc;}}}
+  return false;}
+function findKing(st,color){const b=st.board;for(let r=0;r<8;r++)for(let c=0;c<8;c++)if(b[r][c]===color+'k')return[r,c];return null;}
+function pseudoMoves(st){const b=st.board,me=st.turn,them=me===W?B:W,out=[];
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++){const p=b[r][c];if(!p||colorOf(p)!==me)continue;
+    const t=typeOf(p);const add=(tr,tc,flag)=>out.push({from:[r,c],to:[tr,tc],promo:null,flag:flag||null});
+    if(t==='p'){const dir=me===W?-1:1,start=me===W?6:1,last=me===W?0:7;
+      if(inB(r+dir,c)&&!b[r+dir][c]){if(r+dir===last)out.push({from:[r,c],to:[r+dir,c],promo:'q'});else add(r+dir,c);
+        if(r===start&&!b[r+2*dir][c])add(r+2*dir,c,'double');}
+      for(const dc of[-1,1]){const rr=r+dir,cc=c+dc;if(!inB(rr,cc))continue;const tp=b[rr][cc];
+        if(tp&&colorOf(tp)===them){if(rr===last)out.push({from:[r,c],to:[rr,cc],promo:'q'});else add(rr,cc);}
+        else if(!tp&&st.ep&&st.ep[0]===rr&&st.ep[1]===cc)add(rr,cc,'ep');}
+    }else if(t==='n'){for(const[dr,dc]of DIR.n){const rr=r+dr,cc=c+dc;if(inB(rr,cc)&&colorOf(b[rr][cc])!==me)add(rr,cc);}}
+    else if(t==='k'){for(const[dr,dc]of DIR.k){const rr=r+dr,cc=c+dc;if(inB(rr,cc)&&colorOf(b[rr][cc])!==me)add(rr,cc);}
+      const home=me===W?7:0;
+      if(r===home&&c===4&&!isAttacked(st,home,4,them)){const cr=st.castle;
+        const ks=me===W?cr.wK:cr.bK,qs=me===W?cr.wQ:cr.bQ;
+        if(ks&&!b[home][5]&&!b[home][6]&&b[home][7]===me+'r'&&!isAttacked(st,home,5,them)&&!isAttacked(st,home,6,them))add(home,6,'castleK');
+        if(qs&&!b[home][3]&&!b[home][2]&&!b[home][1]&&b[home][0]===me+'r'&&!isAttacked(st,home,3,them)&&!isAttacked(st,home,2,them))add(home,2,'castleQ');}
+    }else{for(const[dr,dc]of DIR[t]){let rr=r+dr,cc=c+dc;while(inB(rr,cc)){if(colorOf(b[rr][cc])===me)break;add(rr,cc);if(b[rr][cc])break;rr+=dr;cc+=dc;}}}}
+  return out;}
+function applyMove(st,m){const b=st.board;
+  const undo={m,cap:null,capSquare:null,castle:{...st.castle},ep:st.ep,turn:st.turn};
+  const[fr,fc]=m.from,[tr,tc]=m.to;const p=b[fr][fc];
+  if(b[tr][tc]){undo.cap=b[tr][tc];undo.capSquare=[tr,tc];}
+  if(m.flag==='ep'){const cr=st.turn===W?tr+1:tr-1;undo.cap=b[cr][tc];undo.capSquare=[cr,tc];b[cr][tc]=null;}
+  b[tr][tc]=m.promo?st.turn+m.promo:p;b[fr][fc]=null;
+  if(m.flag==='castleK'){const h=st.turn===W?7:0;b[h][5]=b[h][7];b[h][7]=null;}
+  if(m.flag==='castleQ'){const h=st.turn===W?7:0;b[h][3]=b[h][0];b[h][0]=null;}
+  st.castle={...undo.castle};
+  if(typeOf(p)==='k'){if(st.turn===W){st.castle.wK=false;st.castle.wQ=false;}else{st.castle.bK=false;st.castle.bQ=false;}}
+  if(m.flag==='castleK'){if(st.turn===W)st.castle.wK=false;else st.castle.bK=false;}
+  if(m.flag==='castleQ'){if(st.turn===W)st.castle.wQ=false;else st.castle.bQ=false;}
+  if(fr===7&&fc===7)st.castle.wK=false;if(fr===7&&fc===0)st.castle.wQ=false;
+  if(fr===0&&fc===7)st.castle.bK=false;if(fr===0&&fc===0)st.castle.bQ=false;
+  if(tr===7&&tc===7)st.castle.wK=false;if(tr===7&&tc===0)st.castle.wQ=false;
+  if(tr===0&&tc===7)st.castle.bK=false;if(tr===0&&tc===0)st.castle.bQ=false;
+  st.ep=m.flag==='double'?[(fr+tr)/2,fc]:null;
+  st.turn=st.turn===W?B:W;return undo;}
+function unapplyMove(st,u){const b=st.board;const m=u.m;const[fr,fc]=m.from,[tr,tc]=m.to;
+  st.turn=u.turn;let p=b[tr][tc];if(m.promo)p=st.turn+'p';
+  b[fr][fc]=p;b[tr][tc]=null;
+  if(m.flag==='ep'){const cr=u.turn===W?tr+1:tr-1;b[cr][tc]=u.cap;}
+  else if(u.cap){b[u.capSquare[0]][u.capSquare[1]]=u.cap;}
+  if(m.flag==='castleK'){const h=u.turn===W?7:0;b[h][7]=b[h][5];b[h][5]=null;}
+  if(m.flag==='castleQ'){const h=u.turn===W?7:0;b[h][0]=b[h][3];b[h][3]=null;}
+  st.castle=u.castle;st.ep=u.ep;}
+function inCheck(st,color){const k=findKing(st,color);if(!k)return false;return isAttacked(st,k[0],k[1],color===W?B:W);}
+function legalMoves(st){const me=st.turn,res=[];
+  for(const m of pseudoMoves(st)){const u=applyMove(st,m);if(!inCheck(st,me))res.push(m);unapplyMove(st,u);}return res;}
+function evaluate(st){let s=0;const b=st.board;
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++){const p=b[r][c];if(!p)continue;
+    const v=VAL[typeOf(p)]*10 + ((typeOf(p)==='p')?((p[0]===W?(6-r):(r-1))*2):0);
+    s+=p[0]===B?v:-v;}return s;}
+function negamax(st,depth,alpha,beta){
+  const colorSign=st.turn===B?1:-1;
+  const moves=legalMoves(st);
+  if(moves.length===0)return inCheck(st,st.turn)?-100000*depth:0;
+  if(depth===0)return evaluate(st)*colorSign;
+  let best=-Infinity;
+  for(const m of moves){const u=applyMove(st,m);const sc=-negamax(st,depth-1,-beta,-alpha);unapplyMove(st,u);
+    if(sc>best)best=sc;if(sc>alpha)alpha=sc;if(alpha>=beta)break;}
+  return best;}
+function bestMove(st,depth){const moves=legalMoves(st);let bestM=null,bestSc=-Infinity;
+  for(const m of moves){const u=applyMove(st,m);const sc=-negamax(st,depth-1,-Infinity,Infinity);unapplyMove(st,u);
+    if(sc>bestSc||(sc===bestSc&&Math.random()<0.3)){bestSc=sc;bestM=m;}}return bestM;}
+let state=freshState(),history=[],selected=null,flipped=false,gameOver=false;
+const boardEl=document.getElementById('board');
+function cellFlip(r,c){return flipped?[7-r,7-c]:[r,c];}
+function render(){
+  boardEl.innerHTML='';
+  const legal=gameOver?[]:legalMoves(state);
+  const from=selected?legal.filter(m=>m.from[0]===selected[0]&&m.from[1]===selected[1]):[];
+  for(let vr=0;vr<8;vr++)for(let vc=0;vc<8;vc++){
+    const[r,c]=cellFlip(vr,vc);
+    const div=document.createElement('div');
+    div.className='sq '+((r+c)%2===0?'light':'dark');
+    const p=state.board[r][c];
+    if(selected&&selected[0]===r&&selected[1]===c)div.classList.add('sel');
+    const last=history[history.length-1];
+    if(last&&((last.m.from[0]===r&&last.m.from[1]===c)||(last.m.to[0]===r&&last.m.to[1]===c)))div.classList.add('last');
+    if(p&&colorOf(p)===state.turn&&inCheck(state,state.turn)){const k=findKing(state,state.turn);if(k&&k[0]===r&&k[1]===c)div.classList.add('chk');}
+    if(p){const s=document.createElement('span');s.className='piece '+colorOf(p);s.textContent=UNI[p];div.appendChild(s);}
+    const mv=from.find(m=>m.to[0]===r&&m.to[1]===c);
+    if(mv){const d=document.createElement('div');d.className=p?'ring':'dot';div.appendChild(d);}
+    div.onclick=()=>click(r,c);
+    boardEl.appendChild(div);}
+  updatePanels();capPanel();
+}
+function updatePanels(){
+  const st=document.getElementById('status');
+  if(gameOver){st.textContent=gameOver;st.style.color='#39b54a';return;}
+  const side=state.turn===W?'白方':'黑方';
+  if(inCheck(state,state.turn)){st.textContent='哎呀，'+side+'的王被将军啦，快保护它！';st.style.color='#ff5b7f';}
+  else{st.textContent='轮到'+side+'走';st.style.color='#4a90d9';}
+}
+const TIPS={p:'小兵一步一步往前走，别小看它，走到最底线就能变成强大的皇后哦！',
+  r:'车像小火车，直直地横冲直撞，横竖都能跑很远。',
+  n:'马最爱跳“L”形舞步，它是唯一能跳过别人的棋子！',
+  b:'象喜欢斜着散步，它一辈子只走同一种颜色的格子。',
+  q:'皇后是最厉害的战士，横、竖、斜都可以随便走！',
+  k:'国王是全场最重要的人，一次只走一格，要保护好它呀。'};
+function click(r,c){
+  if(gameOver)return;
+  const humanTurn = document.getElementById('mode').value==='2p' ? true : state.turn===W;
+  if(!humanTurn)return;
+  const p=state.board[r][c];
+  if(selected){const legal=legalMoves(state);
+    const mv=legal.find(m=>m.from[0]===selected[0]&&m.from[1]===selected[1]&&m.to[0]===r&&m.to[1]===c);
+    if(mv){doMove(mv);selected=null;render();afterHuman();return;}
+  }
+  if(p&&colorOf(p)===state.turn){selected=[r,c];document.getElementById('tips').textContent=TIPS[typeOf(p)];}
+  else selected=null;
+  render();
+}
+function notation(m){const b=state.board;const files='abcdefgh';
+  const cap=!!(b[m.to[0]][m.to[1]]||m.flag==='ep');
+  if(m.flag==='castleK')return 'O-O';if(m.flag==='castleQ')return 'O-O-O';
+  const t=typeOf(b[m.from[0]][m.from[1]]);
+  const piece={p:'',n:'马',b:'象',r:'车',q:'后',k:'王'}[t]||'';
+  return piece+(cap?'吃':'')+files[m.to[1]]+(8-m.to[0]);}
+function refreshMoves(){
+  const box=document.getElementById('moves');
+  box.innerHTML=history.map((h,i)=>((i%2===0)?('<b>'+(Math.floor(i/2)+1)+'.</b> '):'')+h.name).slice(-24).join(' ');
+  box.scrollTop=box.scrollHeight;
+}
+function doMove(m){
+  const name=notation(m);
+  const u=applyMove(state,m);
+  history.push({m,u,name,side:u.turn});
+  if(m.promo)document.getElementById('tips').textContent='哇！小兵升变成皇后啦，太棒了！';
+  refreshMoves();checkGameEnd();
+}
+function checkGameEnd(){
+  const legal=legalMoves(state);
+  if(legal.length===0){
+    if(inCheck(state,state.turn)){const winner=state.turn===W?'黑方':'白方';
+      gameOver='太棒啦！'+winner+'获胜（将杀）！点“新的一局”再玩～';}
+    else gameOver='平局啦（逼和），谁也没将死谁，再开一局吧！';}
+}
+function afterHuman(){
+  if(gameOver){document.getElementById('status').textContent=gameOver;return;}
+  if(document.getElementById('mode').value==='ai'&&state.turn===B)setTimeout(aiMove,420);
+}
+function aiMove(){
+  if(gameOver)return;
+  const lvl=parseInt(document.getElementById('level').value)||2;
+  const m=bestMove(state,lvl+1);
+  if(m){const u=applyMove(state,m);const nm=notation(m);history.push({m,u,name:nm,side:u.turn});
+    refreshMoves();
+    if(m.promo)document.getElementById('tips').textContent='电脑的小兵也变成皇后啦，要小心！';
+    checkGameEnd();}
+  render();
+}
+function undo(){
+  if(history.length===0)return;
+  let steps=1;
+  if(document.getElementById('mode').value==='ai'&&history.length>=2&&history[history.length-1].side===B)steps=2;
+  for(let i=0;i<steps&&history.length;i++){const h=history.pop();unapplyMove(state,h.u);}
+  gameOver=false;selected=null;render();
+}
+function hint(){
+  if(gameOver)return;
+  const m=bestMove(state,3);
+  if(m){selected=m.from;render();
+    document.getElementById('tips').textContent='小助手觉得：把'+UNI[state.board[m.from[0]][m.from[1]]]+'走到'+
+    'abcdefgh'[m.to[1]]+(8-m.to[0])+'是个不错的主意～';}
+}
+function newGame(){state=freshState();history=[];selected=null;gameOver=false;flipped=false;
+  document.getElementById('moves').innerHTML='';document.getElementById('tips').textContent='新的一局开始啦，白方先走，加油！';render();}
+function flipBoard(){flipped=!flipped;render();}
+function capPanel(){
+  const cw=history.filter(h=>h.u.cap&&h.u.cap[0]===W).map(h=>UNI[h.u.cap]).join('');
+  const cb=history.filter(h=>h.u.cap&&h.u.cap[0]===B).map(h=>UNI[h.u.cap]).join('');
+  document.getElementById('capW').textContent=cw;document.getElementById('capB').textContent=cb;
+  const val=s=>history.filter(h=>h.u.cap&&h.u.cap[0]===s).reduce((a,h)=>a+VAL[typeOf(h.u.cap)],0);
+  document.getElementById('mat').textContent='白方吃子价值 '+val(W)+'  |  黑方吃子价值 '+val(B);
+}
+render();
+</script>
+</body>
+</html>
