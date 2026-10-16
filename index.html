@@ -103,9 +103,8 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
       <div class="coord-b" id="coordB"></div>
     </div>
     <div class="soundbar">
-      <button id="sndMusic" onclick="SND.toggle('music')">🎵 音乐</button>
+      <button id="sndMusic" onclick="SND.toggle('music')">🎹 钢琴曲</button>
       <button id="sndSfx" onclick="SND.toggle('sfx')">🔊 音效</button>
-      <button id="sndVoice" onclick="SND.toggle('voice')">🗣️ 英语</button>
     </div>
     <div class="ioshint" id="iosHint">🔇 听不到声音？iPad / iPhone 侧边的<b>静音拨杆</b>会把网页音频整个关掉，请先拨到非静音档、并把音量调大。<br>不确定有没有修好？点上面的「🔊 音效」开关，能听到“叮咚”一声就说明正常了。（点这里可以收起提示）</div>
     <div class="btns">
@@ -159,13 +158,12 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
 <script>
 /* ==================== 声音引擎（Web Audio 实时合成，无需外部音频文件） ==================== */
 var SND=(function(){
-  var cfg={music:true,sfx:true,voice:true};
+  var cfg={music:true,sfx:true};
   try{var raw=localStorage.getItem('chesskid_sound');if(raw)Object.assign(cfg,JSON.parse(raw));}catch(e){}
   function save(){try{localStorage.setItem('chesskid_sound',JSON.stringify(cfg));}catch(e){}}
 
-  var ctx=null,master=null,musicBus=null,sfxBus=null,noise=null,ducked=false;
+  var ctx=null,master=null,musicBus=null,sfxBus=null,noise=null;
   var musicTimer=null,pumpStart=0,loop=0,idx=0,musicRunning=false;
-  var voiceEn=null,voiceList=[],voiceFail=0,voiceBlocked=false,voiceWarned=false,duckTimer=null;
 
   function m2f(m){return 440*Math.pow(2,(m-69)/12);}
   /* 噪声源延迟创建：iOS 上 AudioContext 刚建好时 sampleRate 可能还拿不到，
@@ -197,7 +195,7 @@ var SND=(function(){
         comp.attack.value=0.003;comp.release.value=0.2;
       }catch(e){}
       master.connect(comp);comp.connect(c.destination);
-      var lp=c.createBiquadFilter();lp.type='lowpass';lp.frequency.value=3400;lp.Q.value=0.6;
+      var lp=c.createBiquadFilter();lp.type='lowpass';lp.frequency.value=4600;lp.Q.value=0.6;
       musicBus=c.createGain();musicBus.gain.value=0;
       sfxBus=c.createGain();sfxBus.gain.value=cfg.sfx?1:0;
       musicBus.connect(lp);lp.connect(master);
@@ -214,70 +212,84 @@ var SND=(function(){
     }catch(e){}
   }
 
-  /* ---------- 背景音乐：8 小节循环，C 大调，104 BPM ---------- */
+  /* ---------- 背景音乐：钢琴曲《欢乐颂》，C 大调，104 BPM，16 小节无缝循环 ---------- */
   var SPB=60/104;
-  var BARS=[
-    [[76,.5],[79,.5],[84,1],[83,.5],[81,.5],[79,1]],
-    [[74,.5],[79,.5],[83,1],[81,.5],[79,.5],[74,1]],
-    [[72,.5],[76,.5],[81,1],[79,.5],[76,.5],[72,1]],
-    [[69,.5],[72,.5],[77,1],[76,.5],[74,.5],[72,1]],
-    [[76,.5],[79,.5],[84,1],[86,.5],[84,.5],[83,1]],
-    [[83,.5],[81,.5],[79,1],[74,.5],[79,.5],[81,1]],
-    [[81,.5],[79,.5],[76,1],[72,.5],[76,.5],[81,1]],
-    [[77,.5],[76,.5],[74,1],[72,2]]
+  /* 旋律：[MIDI 音高, 时值(拍)]，每小节 4 拍；C4=60 D4=62 E4=64 F4=65 G4=67 */
+  var MELODY=[
+    [[64,1],[64,1],[65,1],[67,1]],              /* 1  E E F G   */
+    [[67,1],[65,1],[64,1],[62,1]],              /* 2  G F E D   */
+    [[60,1],[60,1],[62,1],[64,1]],              /* 3  C C D E   */
+    [[64,1.5],[62,0.5],[62,2]],                 /* 4  E. D D    */
+    [[64,1],[64,1],[65,1],[67,1]],              /* 5  E E F G   */
+    [[67,1],[65,1],[64,1],[62,1]],              /* 6  G F E D   */
+    [[60,1],[60,1],[62,1],[64,1]],              /* 7  C C D E   */
+    [[62,1.5],[60,0.5],[60,2]],                 /* 8  D. C C    */
+    [[62,1],[62,1],[64,1],[60,1]],              /* 9  D D E C   */
+    [[62,0.5],[64,0.5],[65,1.5],[64,0.5],[60,1]], /* 10 D. E. F. E. C */
+    [[62,0.5],[64,0.5],[65,1.5],[64,0.5],[62,1]], /* 11 D. E. F. E. D */
+    [[60,1],[60,1],[62,1],[64,1]],              /* 12 C C D E   */
+    [[64,1],[64,1],[65,1],[67,1]],              /* 13 E E F G   */
+    [[67,1],[65,1],[64,1],[62,1]],              /* 14 G F E D   */
+    [[60,1],[60,1],[62,1],[64,1]],              /* 15 C C D E   */
+    [[64,1.5],[62,0.5],[60,2]]                  /* 16 E. D C（收在主音，循环回第 1 小节）*/
   ];
-  var BASS=[48,43,45,41,48,43,45,41];
-  var CHORD=[[60,64,67],[59,62,67],[57,60,64],[57,60,65],[60,64,67],[59,62,67],[57,60,64],[57,60,65]];
+  /* 每小节和弦；左手弹阿尔贝蒂低音（根-五-三-五），就是钢琴谱最常见的伴奏型 */
+  var HARM=['C','C','G7','G7','C','C','G7','C','C','F','C','C','C','C','G7','C'];
+  var ALB={C:[48,55,52,55],G7:[43,50,47,50],F:[41,48,45,48]};
   var EVENTS=(function(){
-    var ev=[],t=0;
-    for(var b=0;b<8;b++){
+    var ev=[],t=0,pg=[.92,.92,1,1,.96,.96,1,1,.94,.94,1,1,.98,.98,1,1];
+    for(var b=0;b<16;b++){
       var mt=t;
-      for(var k=0;k<BARS[b].length;k++){ev.push({t:mt,dur:BARS[b][k][1]*0.9,midi:BARS[b][k][0],kind:'lead'});mt+=BARS[b][k][1];}
-      ev.push({t:t,dur:4,chord:CHORD[b],kind:'pad'});
-      ev.push({t:t,dur:1.7,midi:BASS[b]-12,kind:'bass'});
-      ev.push({t:t+2,dur:1.7,midi:BASS[b]-12,kind:'bass'});
-      for(var p=0;p<4;p++){
-        ev.push({t:t+p,dur:0.05,kind:'hat'});
-        if(p%2===0)ev.push({t:t+p,dur:0.1,kind:'kick'});
+      for(var k=0;k<MELODY[b].length;k++){
+        ev.push({t:mt,dur:MELODY[b][k][1],midi:MELODY[b][k][0],vol:0.30*pg[b],rel:1.7});
+        mt+=MELODY[b][k][1];
       }
+      var ab=ALB[HARM[b]];
+      for(var p=0;p<4;p++)ev.push({t:t+p,dur:1,midi:ab[p],vol:0.22*pg[b],rel:1.05});
       t+=4;
     }
     ev.sort(function(a,b){return a.t-b.t;});
     return ev;
   })();
-  var LOOP=32,LOOPS=LOOP*SPB;
+  var LOOP=64,LOOPS=LOOP*SPB;
 
-  function note(when,midi,dur,vol,type,att){
-    var o=ctx.createOscillator(),g=ctx.createGain();
-    o.type=type;o.frequency.setValueAtTime(m2f(midi),when);
-    var a=att||0.01;
-    g.gain.setValueAtTime(0.0001,when);
-    g.gain.linearRampToValueAtTime(vol,when+a);
-    g.gain.exponentialRampToValueAtTime(0.0001,when+dur);
-    o.connect(g);g.connect(musicBus);
-    o.start(when);o.stop(when+dur+0.06);
+  /* 钢琴音色：正弦泛音堆叠（基波+2/3/4/5/6 次，越高衰减越快）+ 微失谐基波增厚
+     + 30 毫秒琴槌敲击噪声。没有琴槌噪声听着就是电子琴，不像钢琴 */
+  function piano(when,midi,beats,vol,rel){
+    if(!ctx||!musicBus)return;
+    var f=m2f(midi),dur=Math.max(0.18,beats*SPB);
+    var ring=Math.max(0.4,Math.min(2.6,dur*(rel||1.7)));
+    var PARTS=[[1,1],[2,.42],[3,.2],[4,.11],[5,.055],[6,.03]];
+    for(var i=0;i<PARTS.length;i++){
+      var mult=PARTS[i][0],d=Math.max(0.09,ring/Math.sqrt(mult));
+      var o=ctx.createOscillator(),g=ctx.createGain();
+      o.type='sine';o.frequency.setValueAtTime(f*mult,when);
+      g.gain.setValueAtTime(0.0001,when);
+      g.gain.linearRampToValueAtTime(vol*PARTS[i][1],when+0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001,when+d);
+      o.connect(g);g.connect(musicBus);
+      o.start(when);o.stop(when+d+0.05);
+    }
+    var o2=ctx.createOscillator(),g2=ctx.createGain();
+    o2.type='sine';o2.frequency.setValueAtTime(f*1.0022,when);
+    g2.gain.setValueAtTime(0.0001,when);
+    g2.gain.linearRampToValueAtTime(vol*0.5,when+0.006);
+    g2.gain.exponentialRampToValueAtTime(0.0001,when+ring);
+    o2.connect(g2);g2.connect(musicBus);
+    o2.start(when);o2.stop(when+ring+0.05);
+    var nb=noiseBuf();
+    if(nb){
+      var s=ctx.createBufferSource();s.buffer=nb;
+      var hp=ctx.createBiquadFilter();hp.type='highpass';
+      hp.frequency.value=Math.min(9000,Math.max(2000,f*2.6));
+      var g3=ctx.createGain();
+      g3.gain.setValueAtTime(vol*0.4,when);
+      g3.gain.exponentialRampToValueAtTime(0.0001,when+0.032);
+      s.connect(hp);hp.connect(g3);g3.connect(musicBus);
+      s.start(when);s.stop(when+0.06);
+    }
   }
-  function kick(when){
-    var o=ctx.createOscillator(),g=ctx.createGain();
-    o.type='sine';o.frequency.setValueAtTime(155,when);
-    o.frequency.exponentialRampToValueAtTime(46,when+0.13);
-    g.gain.setValueAtTime(0.3,when);g.gain.exponentialRampToValueAtTime(0.0001,when+0.17);
-    o.connect(g);g.connect(musicBus);o.start(when);o.stop(when+0.22);
-  }
-  function hat(when){
-    var nb=noiseBuf();if(!nb)return;
-    var s=ctx.createBufferSource();s.buffer=nb;
-    var f=ctx.createBiquadFilter();f.type='highpass';f.frequency.value=7200;
-    var g=ctx.createGain();g.gain.setValueAtTime(0.075,when);g.gain.exponentialRampToValueAtTime(0.0001,when+0.045);
-    s.connect(f);f.connect(g);g.connect(musicBus);s.start(when);s.stop(when+0.07);
-  }
-  function playEvent(e,when){
-    if(e.kind==='lead')note(when,e.midi,e.dur,0.17,'square');
-    else if(e.kind==='pad')for(var i=0;i<e.chord.length;i++)note(when,e.chord[i],e.dur*0.98,0.072,'sine',0.55);
-    else if(e.kind==='bass')note(when,e.midi,e.dur*0.92,0.19,'triangle');
-    else if(e.kind==='kick')kick(when);
-    else if(e.kind==='hat')hat(when);
-  }
+  function playEvent(e,when){piano(when,e.midi,e.dur,e.vol,e.rel);}
   /* 提前排 4 小节（≈9.2 秒）的音符，定时器被省电模式节流也不会断音 */
   var HORIZON=16*SPB;
   function pump(){
@@ -292,7 +304,7 @@ var SND=(function(){
       idx++;if(idx>=EVENTS.length){idx=0;loop++;}
     }
   }
-  function musicTarget(){return (musicRunning&&cfg.music)?(ducked?0.24:0.85):0;}
+  function musicTarget(){return (musicRunning&&cfg.music)?0.85:0;}
   function musicGainNow(tc){if(!ctx||!musicBus)return;try{musicBus.gain.setTargetAtTime(musicTarget(),ctx.currentTime,tc||0.15);}catch(e){}}
   function startMusic(){
     if(!ctx||!cfg.music)return;
@@ -306,12 +318,6 @@ var SND=(function(){
     musicRunning=false;
     if(musicTimer){clearInterval(musicTimer);musicTimer=null;}
     musicGainNow(0.04);   /* 闸门静音：已排程的音符不再出声 */
-  }
-  function duck(on,ms){
-    ducked=on;musicGainNow(0.14);
-    if(duckTimer){clearTimeout(duckTimer);duckTimer=null;}
-    /* 兜底：有些安卓 TTS 不触发 onend，防止音乐一直被压低 */
-    if(on)duckTimer=setTimeout(function(){ducked=false;musicGainNow(0.25);},ms||4000);
   }
 
   /* ---------- 音效 ---------- */
@@ -347,73 +353,6 @@ var SND=(function(){
     else if(name==='illegal'){tone(t,155,110,0.19,0.18,'sawtooth');}
   }
 
-  /* ---------- 英文语音报棋 ---------- */
-  var NM={p:'Pawn',n:'Knight',b:'Bishop',r:'Rook',q:'Queen',k:'King'};
-  /* 关键：必须显式挑一个英文 voice。只设 lang='en-US' 时，iPad/Safari 会忽略它并
-     用系统语言（中文/粤语）的语音去念英文，就会听成"粤语夹英文"。 */
-  function loadVoices(){
-    var ss=window.speechSynthesis;
-    if(!ss||!ss.getVoices)return;
-    try{voiceList=ss.getVoices()||[];}catch(e){voiceList=[];}
-    var en=voiceList.filter(function(v){return /^en([-_]|$)/i.test(v.lang||'');});
-    if(!en.length)en=voiceList.filter(function(v){return /english/i.test(v.name||'');});
-    voiceEn=en.filter(function(v){return /^en[-_]US/i.test(v.lang||'');})[0]
-         || en.filter(function(v){return /^en[-_]GB/i.test(v.lang||'');})[0]
-         || en[0] || null;
-    /* 有语音引擎、但一个英文语音都没有（未装英文语音包的安卓机）→ 标记不可用 */
-    if(voiceList.length&&!voiceEn)voiceBlocked=true;
-    else if(voiceEn)voiceBlocked=false;
-    paint();
-  }
-  function warnVoice(auto){
-    if(auto){cfg.voice=false;save();}
-    if(!voiceWarned){voiceWarned=true;
-      var el=document.getElementById('tips');
-      if(el)el.textContent='这台设备的浏览器没有可用的英文语音，英语报棋就先用不了啦（手机设置里装个英文语音包就能用），其它声音都正常～';}
-    paint();
-  }
-  var speakSeq=0;
-  function checkVoiceFail(){if(voiceFail>=3&&!voiceBlocked){voiceBlocked=true;warnVoice(true);}}
-  function say(text){
-    if(!cfg.voice||!text)return;
-    var ss=window.speechSynthesis;
-    if(!ss||!window.SpeechSynthesisUtterance)return;
-    if(!voiceList.length)loadVoices();
-    if(voiceBlocked){warnVoice(true);return;}
-    try{
-      /* 只在真的还在念时才打断。安卓 Chrome 上无条件 cancel() 会让引擎卡住不出声 */
-      if(ss.speaking||ss.pending)ss.cancel();
-      var u=new SpeechSynthesisUtterance(text);
-      /* 先把语种定死成英文（这一步决定 iPad 会不会用粤语念英文），再尝试绑定具体女声；
-         voice 对象在某些环境不被接受会抛错，但语种必须保住 */
-      u.lang=voiceEn?(voiceEn.lang||'en-US'):'en-US';
-      u.rate=0.92;u.pitch=1.12;u.volume=1;
-      if(voiceEn){try{u.voice=voiceEn;}catch(e2){}}
-      var seq=++speakSeq,started=false;
-      u.onstart=function(){started=true;voiceFail=0;duck(true,Math.max(1600,text.length*95));};
-      u.onend=function(){duck(false);};
-      u.onerror=function(){duck(false);voiceFail++;checkVoiceFail();};
-      ss.speak(u);
-      /* 兜底：部分安卓机 speak() 既不报错也不出声，靠超时检测揪出来 */
-      setTimeout(function(){
-        if(started||seq!==speakSeq)return;
-        try{if(ss.speaking||ss.pending)return;}catch(e){}
-        voiceFail++;checkVoiceFail();
-      },1600);
-    }catch(e){voiceFail++;checkVoiceFail();}
-  }
-  function sentence(m,mover,cap){
-    var files='abcdefgh';
-    function sq(p){return files[p[1]]+' '+(8-p[0]);}
-    if(m.flag==='castleK')return 'Castle, king side';
-    if(m.flag==='castleQ')return 'Castle, queen side';
-    var s=NM[mover?mover[1]:'p']||'Piece';
-    if(cap)s+=' takes '+NM[cap[1]]+' on '+sq(m.to);
-    else s+=' to '+sq(m.to);
-    if(m.promo)s+=' and becomes a Queen';
-    return s;
-  }
-
   /* ---------- 解锁：iOS/Safari 必须在用户手势里创建并 resume AudioContext ---------- */
   var nudged=false;
   function ensureAudio(){
@@ -432,21 +371,19 @@ var SND=(function(){
   });
   window.addEventListener('pageshow',ensureAudio);
   document.addEventListener('visibilitychange',function(){
-    if(document.hidden){stopMusic();if(window.speechSynthesis)try{window.speechSynthesis.cancel();}catch(e){}}
+    if(document.hidden)stopMusic();
     else ensureAudio();
   });
-  var BTN={music:'sndMusic',sfx:'sndSfx',voice:'sndVoice'};
-  var LABEL={music:'🎵 音乐',sfx:'🔊 音效',voice:'🗣️ 英语'};
+  var BTN={music:'sndMusic',sfx:'sndSfx'};
+  var LABEL={music:'🎹 钢琴曲',sfx:'🔊 音效'};
   function paint(){
     Object.keys(BTN).forEach(function(k){
       var el=document.getElementById(BTN[k]);if(!el)return;
-      var broken=(k==='voice'&&voiceBlocked);
-      el.textContent=LABEL[k]+(broken?' 不可用':(cfg[k]?' 开':' 关'));
-      el.className=(cfg[k]&&!broken)?'':'off';
+      el.textContent=LABEL[k]+(cfg[k]?' 开':' 关');
+      el.className=cfg[k]?'':'off';
     });
   }
   function toggle(kind){
-    if(kind==='voice'&&!cfg.voice){loadVoices();if(voiceBlocked){warnVoice(false);return;}}
     cfg[kind]=!cfg[kind];save();
     if(kind==='music'){
       if(cfg.music){ensureAudio();musicGainNow(0.12);}
@@ -456,26 +393,14 @@ var SND=(function(){
       sfxBus.gain.setTargetAtTime(cfg.sfx?1:0,ctx.currentTime,0.08);
       if(cfg.sfx)fx('next');            /* 打开时响一声，立刻就能确认这台设备出不出声 */
     }
-    if(kind==='voice'&&!cfg.voice&&window.speechSynthesis){
-      try{window.speechSynthesis.cancel();}catch(e){}
-      duck(false);
-    }
     paint();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',paint);else paint();
-  /* iOS/Safari 首次 getVoices() 返回空数组，靠 voiceschanged + 定时补取 */
-  if(window.speechSynthesis){
-    try{window.speechSynthesis.onvoiceschanged=loadVoices;}catch(e){}
-    loadVoices();
-    setTimeout(loadVoices,500);
-    setTimeout(loadVoices,1800);
-  }
   return {
     unlock:ensureAudio,toggle:toggle,paint:paint,
     select:function(){fx('select');},move:function(){fx('move');},capture:function(){fx('capture');},
     check:function(){fx('check');},win:function(){fx('win');},lose:function(){fx('lose');},draw:function(){fx('draw');},
-    undo:function(){fx('undo');},flip:function(){fx('flip');},next:function(){fx('next');},illegal:function(){fx('illegal');},
-    english:sentence, speak:say
+    undo:function(){fx('undo');},flip:function(){fx('flip');},next:function(){fx('next');},illegal:function(){fx('illegal');}
   };
 })();
 
@@ -723,17 +648,14 @@ function updateLastMove(){
   el.innerHTML='<span class="lm-tag">'+(isB?'⚫ ':'⚪ ')+whoName(last.side)+'走了这一步</span>'+
     '<span class="lm-main">'+last.info.uni+' '+last.info.text+'</span>';
 }
-function moveFeedback(m,mover,u){
-  const en=SND.english(m,mover,u.cap);
-  let tail='';
+function moveFeedback(u){
   if(gameOver){
-    if(gameResult&&gameResult.type==='draw'){SND.draw();tail=', draw.';}
-    else if(gameResult&&gameResult.winner===W){SND.win();tail=', checkmate! White wins!';}
-    else {SND.lose();tail=', checkmate! Black wins!';}
-  }else if(inCheck(state,state.turn)){SND.check();tail=', check!';}
+    if(gameResult&&gameResult.type==='draw')SND.draw();
+    else if(gameResult&&gameResult.winner===W)SND.win();
+    else SND.lose();
+  }else if(inCheck(state,state.turn))SND.check();
   else if(u.cap)SND.capture();
   else SND.move();
-  SND.speak(en+tail);
 }
 function settleInfo(info){if(!info)return;
   if(gameOver)info.text+=(gameResult&&gameResult.type==='draw')?' —— 和棋':
@@ -748,7 +670,7 @@ function doMove(m){
   refreshMoves();checkGameEnd();settleInfo(info);
   pendingFly={from:m.from,to:m.to,char:UNI[mover],color:mover[0]};
   freshLast=true;
-  moveFeedback(m,mover,u);
+  moveFeedback(u);
 }
 function posKey(st){return st.board.map(row=>row.map(p=>p||'.').join('')).join('/')+'|'+st.turn+'|'+
   (st.castle.wK?'K':'')+(st.castle.wQ?'Q':'')+(st.castle.bK?'k':'')+(st.castle.bQ?'q':'')+'|'+(st.ep?st.ep.join(''):'-');}
@@ -792,7 +714,7 @@ function aiMove(){
     checkGameEnd();settleInfo(info);
     pendingFly={from:m.from,to:m.to,char:UNI[mover],color:mover[0]};
     freshLast=true;
-    moveFeedback(m,mover,u);}
+    moveFeedback(u);}
   render();
 }
 function undo(){
