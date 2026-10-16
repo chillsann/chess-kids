@@ -159,7 +159,9 @@ var SND=(function(){
   try{var raw=localStorage.getItem('chesskid_sound');if(raw)Object.assign(cfg,JSON.parse(raw));}catch(e){}
   function save(){try{localStorage.setItem('chesskid_sound',JSON.stringify(cfg));}catch(e){}}
 
-  var ctx=null,master=null,musicBus=null,sfxBus=null,noise=null,ducked=false,musicTimer=null,musicStart=0,loop=0,idx=0;
+  var ctx=null,master=null,musicBus=null,sfxBus=null,noise=null,ducked=false;
+  var musicTimer=null,pumpStart=0,loop=0,idx=0,musicRunning=false;
+  var voiceEn=null,voiceList=[],voiceFail=0,voiceBlocked=false,voiceWarned=false,duckTimer=null;
 
   function m2f(m){return 440*Math.pow(2,(m-69)/12);}
   function init(){
@@ -167,10 +169,10 @@ var SND=(function(){
     var AC=window.AudioContext||window.webkitAudioContext;
     if(!AC)return;
     try{ctx=new AC();}catch(e){return;}
-    master=ctx.createGain();master.gain.value=0.9;master.connect(ctx.destination);
-    var lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=3200;lp.Q.value=0.7;
-    musicBus=ctx.createGain();musicBus.gain.value=cfg.music?0.5:0;
-    sfxBus=ctx.createGain();sfxBus.gain.value=cfg.sfx?0.9:0;
+    master=ctx.createGain();master.gain.value=1;master.connect(ctx.destination);
+    var lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=3400;lp.Q.value=0.6;
+    musicBus=ctx.createGain();musicBus.gain.value=0;
+    sfxBus=ctx.createGain();sfxBus.gain.value=cfg.sfx?1:0;
     musicBus.connect(lp);lp.connect(master);
     sfxBus.connect(master);
     var len=Math.floor(ctx.sampleRate*0.2);
@@ -236,29 +238,47 @@ var SND=(function(){
     s.connect(f);f.connect(g);g.connect(musicBus);s.start(when);s.stop(when+0.07);
   }
   function playEvent(e,when){
-    if(e.kind==='lead')note(when,e.midi,e.dur,0.085,'square');
-    else if(e.kind==='pad')for(var i=0;i<e.chord.length;i++)note(when,e.chord[i],e.dur*0.98,0.042,'sine',0.55);
-    else if(e.kind==='bass')note(when,e.midi,e.dur*0.92,0.11,'triangle');
+    if(e.kind==='lead')note(when,e.midi,e.dur,0.10,'square');
+    else if(e.kind==='pad')for(var i=0;i<e.chord.length;i++)note(when,e.chord[i],e.dur*0.98,0.05,'sine',0.55);
+    else if(e.kind==='bass')note(when,e.midi,e.dur*0.92,0.13,'triangle');
     else if(e.kind==='kick')kick(when);
     else if(e.kind==='hat')hat(when);
   }
-  function startMusic(){
-    if(!ctx||musicTimer||!cfg.music)return;
-    musicStart=ctx.currentTime+0.2;loop=0;idx=0;
-    musicTimer=setInterval(function(){
-      if(!ctx)return;
-      var now=ctx.currentTime,guard=0;
-      while(guard++<600){
-        var e=EVENTS[idx],when=musicStart+loop*LOOPS+e.t*SPB;
-        if(when>now+0.25)break;
-        if(when>now-0.06)playEvent(e,when);
-        idx++;if(idx>=EVENTS.length){idx=0;loop++;}
-      }
-    },25);
+  /* 提前排 4 小节（≈9.2 秒）的音符，定时器被省电模式节流也不会断音 */
+  var HORIZON=16*SPB;
+  function pump(){
+    if(!ctx||!musicRunning)return;
+    var now=ctx.currentTime,guard=0;
+    /* 从后台回来 / 被来电打断后时间轴会落后，重新对齐 */
+    if(pumpStart+loop*LOOPS+EVENTS[idx].t*SPB<now-1.5){pumpStart=now+0.15;loop=0;idx=0;}
+    while(guard++<3000){
+      var when=pumpStart+loop*LOOPS+EVENTS[idx].t*SPB;
+      if(when>=now+HORIZON)break;
+      if(when>now-0.12)playEvent(EVENTS[idx],when);
+      idx++;if(idx>=EVENTS.length){idx=0;loop++;}
+    }
   }
-  function stopMusic(){if(musicTimer){clearInterval(musicTimer);musicTimer=null;}}
-  function level(){return cfg.music?(ducked?0.11:0.5):0;}
-  function duck(on){if(!ctx||!musicBus)return;ducked=on;musicBus.gain.setTargetAtTime(level(),ctx.currentTime,0.16);}
+  function musicTarget(){return (musicRunning&&cfg.music)?(ducked?0.15:0.62):0;}
+  function musicGainNow(tc){if(!ctx||!musicBus)return;try{musicBus.gain.setTargetAtTime(musicTarget(),ctx.currentTime,tc||0.15);}catch(e){}}
+  function startMusic(){
+    if(!ctx||!cfg.music)return;
+    if(ctx.state!=='running'){try{ctx.resume();}catch(e){}}
+    pumpStart=ctx.currentTime+0.15;loop=0;idx=0;musicRunning=true;
+    if(!musicTimer)musicTimer=setInterval(pump,900);
+    pump();
+    musicGainNow(0.08);
+  }
+  function stopMusic(){
+    musicRunning=false;
+    if(musicTimer){clearInterval(musicTimer);musicTimer=null;}
+    musicGainNow(0.04);   /* 闸门静音：已排程的音符不再出声 */
+  }
+  function duck(on,ms){
+    ducked=on;musicGainNow(0.14);
+    if(duckTimer){clearTimeout(duckTimer);duckTimer=null;}
+    /* 兜底：有些安卓 TTS 不触发 onend，防止音乐一直被压低 */
+    if(on)duckTimer=setTimeout(function(){ducked=false;musicGainNow(0.25);},ms||4000);
+  }
 
   /* ---------- 音效 ---------- */
   function tone(when,f1,f2,dur,vol,type){
@@ -294,19 +314,58 @@ var SND=(function(){
 
   /* ---------- 英文语音报棋 ---------- */
   var NM={p:'Pawn',n:'Knight',b:'Bishop',r:'Rook',q:'Queen',k:'King'};
+  /* 关键：必须显式挑一个英文 voice。只设 lang='en-US' 时，iPad/Safari 会忽略它并
+     用系统语言（中文/粤语）的语音去念英文，就会听成"粤语夹英文"。 */
+  function loadVoices(){
+    var ss=window.speechSynthesis;
+    if(!ss||!ss.getVoices)return;
+    try{voiceList=ss.getVoices()||[];}catch(e){voiceList=[];}
+    var en=voiceList.filter(function(v){return /^en([-_]|$)/i.test(v.lang||'');});
+    if(!en.length)en=voiceList.filter(function(v){return /english/i.test(v.name||'');});
+    voiceEn=en.filter(function(v){return /^en[-_]US/i.test(v.lang||'');})[0]
+         || en.filter(function(v){return /^en[-_]GB/i.test(v.lang||'');})[0]
+         || en[0] || null;
+    /* 有语音引擎、但一个英文语音都没有（未装英文语音包的安卓机）→ 标记不可用 */
+    if(voiceList.length&&!voiceEn)voiceBlocked=true;
+    else if(voiceEn)voiceBlocked=false;
+    paint();
+  }
+  function warnVoice(auto){
+    if(auto){cfg.voice=false;save();}
+    if(!voiceWarned){voiceWarned=true;
+      var el=document.getElementById('tips');
+      if(el)el.textContent='这台设备的浏览器没有可用的英文语音，英语报棋就先用不了啦（手机设置里装个英文语音包就能用），其它声音都正常～';}
+    paint();
+  }
+  var speakSeq=0;
+  function checkVoiceFail(){if(voiceFail>=3&&!voiceBlocked){voiceBlocked=true;warnVoice(true);}}
   function say(text){
     if(!cfg.voice||!text)return;
     var ss=window.speechSynthesis;
     if(!ss||!window.SpeechSynthesisUtterance)return;
+    if(!voiceList.length)loadVoices();
+    if(voiceBlocked){warnVoice(true);return;}
     try{
-      ss.cancel();
+      /* 只在真的还在念时才打断。安卓 Chrome 上无条件 cancel() 会让引擎卡住不出声 */
+      if(ss.speaking||ss.pending)ss.cancel();
       var u=new SpeechSynthesisUtterance(text);
-      u.lang='en-US';u.rate=0.92;u.pitch=1.12;u.volume=1;
-      u.onstart=function(){duck(true);};
+      /* 先把语种定死成英文（这一步决定 iPad 会不会用粤语念英文），再尝试绑定具体女声；
+         voice 对象在某些环境不被接受会抛错，但语种必须保住 */
+      u.lang=voiceEn?(voiceEn.lang||'en-US'):'en-US';
+      u.rate=0.92;u.pitch=1.12;u.volume=1;
+      if(voiceEn){try{u.voice=voiceEn;}catch(e2){}}
+      var seq=++speakSeq,started=false;
+      u.onstart=function(){started=true;voiceFail=0;duck(true,Math.max(1600,text.length*95));};
       u.onend=function(){duck(false);};
-      u.onerror=function(){duck(false);};
+      u.onerror=function(){duck(false);voiceFail++;checkVoiceFail();};
       ss.speak(u);
-    }catch(e){}
+      /* 兜底：部分安卓机 speak() 既不报错也不出声，靠超时检测揪出来 */
+      setTimeout(function(){
+        if(started||seq!==speakSeq)return;
+        try{if(ss.speaking||ss.pending)return;}catch(e){}
+        voiceFail++;checkVoiceFail();
+      },1600);
+    }catch(e){voiceFail++;checkVoiceFail();}
   }
   function sentence(m,mover,cap){
     var files='abcdefgh';
@@ -320,42 +379,62 @@ var SND=(function(){
     return s;
   }
 
-  /* ---------- 解锁与开关 ---------- */
-  function unlock(){
-    init();
-    if(ctx&&ctx.state==='suspended')ctx.resume();
-    if(cfg.music)startMusic();
-    document.removeEventListener('pointerdown',unlock);
-    document.removeEventListener('keydown',unlock);
-    document.removeEventListener('touchstart',unlock);
+  /* ---------- 解锁：iOS/Safari 必须在用户手势里创建并 resume AudioContext ---------- */
+  function ensureAudio(){
+    if(!ctx)init();
+    if(!ctx)return;
+    if(ctx.state!=='running'){          /* 'suspended' 或 iOS 15+ 的 'interrupted' */
+      try{
+        var pr=ctx.resume();
+        if(pr&&pr.then)pr.then(function(){if(cfg.music&&!document.hidden)startMusic();});
+      }catch(e){}
+    }else if(cfg.music&&!musicRunning&&!document.hidden){
+      startMusic();
+    }
   }
-  document.addEventListener('pointerdown',unlock);
-  document.addEventListener('keydown',unlock);
-  document.addEventListener('touchstart',unlock,{passive:true});
+  /* 每次交互都复查一次：iPad/iPhone 来电、锁屏、切后台后系统会把 AudioContext 挂起 */
+  ['pointerdown','touchstart','touchend','mousedown','keydown','click'].forEach(function(ev){
+    document.addEventListener(ev,ensureAudio,ev==='touchstart'?{passive:true}:false);
+  });
+  window.addEventListener('pageshow',ensureAudio);
   document.addEventListener('visibilitychange',function(){
     if(document.hidden){stopMusic();if(window.speechSynthesis)try{window.speechSynthesis.cancel();}catch(e){}}
-    else if(cfg.music&&ctx)startMusic();
+    else ensureAudio();
   });
-
   var BTN={music:'sndMusic',sfx:'sndSfx',voice:'sndVoice'};
   var LABEL={music:'🎵 音乐',sfx:'🔊 音效',voice:'🗣️ 英语'};
   function paint(){
     Object.keys(BTN).forEach(function(k){
       var el=document.getElementById(BTN[k]);if(!el)return;
-      el.textContent=LABEL[k]+(cfg[k]?' 开':' 关');
-      el.className=cfg[k]?'':'off';
+      var broken=(k==='voice'&&voiceBlocked);
+      el.textContent=LABEL[k]+(broken?' 不可用':(cfg[k]?' 开':' 关'));
+      el.className=(cfg[k]&&!broken)?'':'off';
     });
   }
   function toggle(kind){
+    if(kind==='voice'&&!cfg.voice){loadVoices();if(voiceBlocked){warnVoice(false);return;}}
     cfg[kind]=!cfg[kind];save();
-    if(kind==='music'){if(cfg.music){if(ctx)startMusic();}else stopMusic();if(ctx)musicBus.gain.setTargetAtTime(level(),ctx.currentTime,0.2);}
-    if(kind==='sfx'&&ctx)sfxBus.gain.setTargetAtTime(cfg.sfx?0.9:0,ctx.currentTime,0.08);
-    if(kind==='voice'&&!cfg.voice&&window.speechSynthesis){try{window.speechSynthesis.cancel();duck(false);}catch(e){}}
+    if(kind==='music'){
+      if(cfg.music){ensureAudio();musicGainNow(0.12);}
+      else stopMusic();
+    }
+    if(kind==='sfx'&&ctx)sfxBus.gain.setTargetAtTime(cfg.sfx?1:0,ctx.currentTime,0.08);
+    if(kind==='voice'&&!cfg.voice&&window.speechSynthesis){
+      try{window.speechSynthesis.cancel();}catch(e){}
+      duck(false);
+    }
     paint();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',paint);else paint();
+  /* iOS/Safari 首次 getVoices() 返回空数组，靠 voiceschanged + 定时补取 */
+  if(window.speechSynthesis){
+    try{window.speechSynthesis.onvoiceschanged=loadVoices;}catch(e){}
+    loadVoices();
+    setTimeout(loadVoices,500);
+    setTimeout(loadVoices,1800);
+  }
   return {
-    unlock:unlock,toggle:toggle,paint:paint,
+    unlock:ensureAudio,toggle:toggle,paint:paint,
     select:function(){fx('select');},move:function(){fx('move');},capture:function(){fx('capture');},
     check:function(){fx('check');},win:function(){fx('win');},lose:function(){fx('lose');},draw:function(){fx('draw');},
     undo:function(){fx('undo');},flip:function(){fx('flip');},next:function(){fx('next');},illegal:function(){fx('illegal');},
