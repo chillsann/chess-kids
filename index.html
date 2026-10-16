@@ -81,6 +81,9 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
 #tips{font-size:13px;color:#c56a8b;line-height:1.7;}
 .tag{display:inline-block;background:#fff0f5;border-radius:8px;padding:2px 6px;margin:2px;font-size:12px;color:#b56488;}
 .soundbar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
+.ioshint{display:none;width:100%;text-align:center;font-size:11px;line-height:1.55;color:#9c7040;
+  background:#fff7e8;border:1px solid #f0dcbb;border-radius:12px;padding:6px 10px;cursor:pointer;}
+.ioshint b{color:#c05621;}
 .soundbar button{background:#b9a7f5;box-shadow:0 4px 0 #8f7bd0;font-size:12px;padding:7px 11px;}
 .soundbar button:active{transform:translateY(3px);box-shadow:0 1px 0 #8f7bd0;}
 .soundbar button.off{background:#d8d3e6;box-shadow:0 4px 0 #b0a9c4;color:#8f88a6;}
@@ -104,6 +107,7 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
       <button id="sndSfx" onclick="SND.toggle('sfx')">🔊 音效</button>
       <button id="sndVoice" onclick="SND.toggle('voice')">🗣️ 英语</button>
     </div>
+    <div class="ioshint" id="iosHint">🔇 听不到声音？iPad / iPhone 侧边的<b>静音拨杆</b>会把网页音频整个关掉，请先拨到非静音档、并把音量调大。<br>不确定有没有修好？点上面的「🔊 音效」开关，能听到“叮咚”一声就说明正常了。（点这里可以收起提示）</div>
     <div class="btns">
       <button class="alt" onclick="newGame()">新的一局</button>
       <button onclick="undo()">悔棋</button>
@@ -164,21 +168,50 @@ var SND=(function(){
   var voiceEn=null,voiceList=[],voiceFail=0,voiceBlocked=false,voiceWarned=false,duckTimer=null;
 
   function m2f(m){return 440*Math.pow(2,(m-69)/12);}
+  /* 噪声源延迟创建：iOS 上 AudioContext 刚建好时 sampleRate 可能还拿不到，
+     之前直接在这里 createBuffer 一旦报错，ctx 已经赋值导致此后永远初始化不了 */
+  function noiseBuf(){
+    if(noise||!ctx)return noise;
+    try{
+      var sr=ctx.sampleRate;
+      if(!sr||sr<8000||sr>192000)sr=44100;
+      var len=Math.max(64,Math.floor(sr*0.2));
+      noise=ctx.createBuffer(1,len,sr);
+      var d=noise.getChannelData(0);
+      for(var i=0;i<len;i++)d[i]=Math.random()*2-1;
+    }catch(e){noise=null;}
+    return noise;
+  }
   function init(){
     if(ctx)return;
     var AC=window.AudioContext||window.webkitAudioContext;
     if(!AC)return;
-    try{ctx=new AC();}catch(e){return;}
-    master=ctx.createGain();master.gain.value=1;master.connect(ctx.destination);
-    var lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=3400;lp.Q.value=0.6;
-    musicBus=ctx.createGain();musicBus.gain.value=0;
-    sfxBus=ctx.createGain();sfxBus.gain.value=cfg.sfx?1:0;
-    musicBus.connect(lp);lp.connect(master);
-    sfxBus.connect(master);
-    var len=Math.floor(ctx.sampleRate*0.2);
-    noise=ctx.createBuffer(1,len,ctx.sampleRate);
-    var d=noise.getChannelData(0);
-    for(var i=0;i<len;i++)d[i]=Math.random()*2-1;
+    var c;
+    try{
+      c=new AC();
+      /* 整条链路搭好之前不认这个 ctx，半成品会让音频彻底哑掉 */
+      master=c.createGain();master.gain.value=1;
+      var comp=c.createDynamicsCompressor();
+      try{
+        comp.threshold.value=-8;comp.knee.value=6;comp.ratio.value=4;
+        comp.attack.value=0.003;comp.release.value=0.2;
+      }catch(e){}
+      master.connect(comp);comp.connect(c.destination);
+      var lp=c.createBiquadFilter();lp.type='lowpass';lp.frequency.value=3400;lp.Q.value=0.6;
+      musicBus=c.createGain();musicBus.gain.value=0;
+      sfxBus=c.createGain();sfxBus.gain.value=cfg.sfx?1:0;
+      musicBus.connect(lp);lp.connect(master);
+      sfxBus.connect(master);
+    }catch(e){ctx=null;master=musicBus=sfxBus=noise=null;return;}
+    ctx=c;
+  }
+  /* iOS 经典解锁手法：在手势里播一个 1 帧静音，逼系统把音频输出打开 */
+  function nudge(){
+    if(!ctx)return;
+    try{
+      var b=ctx.createBuffer(1,1,22050);
+      var s=ctx.createBufferSource();s.buffer=b;s.connect(ctx.destination);s.start(0);
+    }catch(e){}
   }
 
   /* ---------- 背景音乐：8 小节循环，C 大调，104 BPM ---------- */
@@ -228,19 +261,20 @@ var SND=(function(){
     var o=ctx.createOscillator(),g=ctx.createGain();
     o.type='sine';o.frequency.setValueAtTime(155,when);
     o.frequency.exponentialRampToValueAtTime(46,when+0.13);
-    g.gain.setValueAtTime(0.2,when);g.gain.exponentialRampToValueAtTime(0.0001,when+0.17);
+    g.gain.setValueAtTime(0.3,when);g.gain.exponentialRampToValueAtTime(0.0001,when+0.17);
     o.connect(g);g.connect(musicBus);o.start(when);o.stop(when+0.22);
   }
   function hat(when){
-    var s=ctx.createBufferSource();s.buffer=noise;
+    var nb=noiseBuf();if(!nb)return;
+    var s=ctx.createBufferSource();s.buffer=nb;
     var f=ctx.createBiquadFilter();f.type='highpass';f.frequency.value=7200;
-    var g=ctx.createGain();g.gain.setValueAtTime(0.05,when);g.gain.exponentialRampToValueAtTime(0.0001,when+0.045);
+    var g=ctx.createGain();g.gain.setValueAtTime(0.075,when);g.gain.exponentialRampToValueAtTime(0.0001,when+0.045);
     s.connect(f);f.connect(g);g.connect(musicBus);s.start(when);s.stop(when+0.07);
   }
   function playEvent(e,when){
-    if(e.kind==='lead')note(when,e.midi,e.dur,0.10,'square');
-    else if(e.kind==='pad')for(var i=0;i<e.chord.length;i++)note(when,e.chord[i],e.dur*0.98,0.05,'sine',0.55);
-    else if(e.kind==='bass')note(when,e.midi,e.dur*0.92,0.13,'triangle');
+    if(e.kind==='lead')note(when,e.midi,e.dur,0.17,'square');
+    else if(e.kind==='pad')for(var i=0;i<e.chord.length;i++)note(when,e.chord[i],e.dur*0.98,0.072,'sine',0.55);
+    else if(e.kind==='bass')note(when,e.midi,e.dur*0.92,0.19,'triangle');
     else if(e.kind==='kick')kick(when);
     else if(e.kind==='hat')hat(when);
   }
@@ -258,11 +292,11 @@ var SND=(function(){
       idx++;if(idx>=EVENTS.length){idx=0;loop++;}
     }
   }
-  function musicTarget(){return (musicRunning&&cfg.music)?(ducked?0.15:0.62):0;}
+  function musicTarget(){return (musicRunning&&cfg.music)?(ducked?0.24:0.85):0;}
   function musicGainNow(tc){if(!ctx||!musicBus)return;try{musicBus.gain.setTargetAtTime(musicTarget(),ctx.currentTime,tc||0.15);}catch(e){}}
   function startMusic(){
     if(!ctx||!cfg.music)return;
-    if(ctx.state!=='running'){try{ctx.resume();}catch(e){}}
+    if(ctx.state!=='running'){try{ctx.resume();}catch(e){}nudge();}
     pumpStart=ctx.currentTime+0.15;loop=0;idx=0;musicRunning=true;
     if(!musicTimer)musicTimer=setInterval(pump,900);
     pump();
@@ -291,7 +325,8 @@ var SND=(function(){
     o.connect(g);g.connect(sfxBus);o.start(when);o.stop(when+dur+0.04);
   }
   function burst(when,dur,vol,freq){
-    var s=ctx.createBufferSource();s.buffer=noise;
+    var nb=noiseBuf();if(!nb)return;
+    var s=ctx.createBufferSource();s.buffer=nb;
     var f=ctx.createBiquadFilter();f.type='bandpass';f.frequency.value=freq||1600;f.Q.value=1.1;
     var g=ctx.createGain();g.gain.setValueAtTime(vol,when);g.gain.exponentialRampToValueAtTime(0.0001,when+dur);
     s.connect(f);f.connect(g);g.connect(sfxBus);s.start(when);s.stop(when+dur+0.03);
@@ -299,17 +334,17 @@ var SND=(function(){
   function fx(name){
     init();if(!ctx||!cfg.sfx)return;
     var t=ctx.currentTime+0.012;
-    if(name==='select'){tone(t,920,920,0.065,0.10,'sine');}
-    else if(name==='move'){tone(t,660,190,0.085,0.22,'triangle');burst(t,0.045,0.09,2400);}
-    else if(name==='capture'){tone(t,300,95,0.17,0.24,'square');burst(t,0.09,0.16,1100);}
-    else if(name==='check'){tone(t,1046,1046,0.1,0.17,'square');tone(t+0.13,1318,1318,0.16,0.17,'square');}
-    else if(name==='win'){[523,659,784,1046].forEach(function(f,i){tone(t+i*0.11,f,f,0.24,0.18,'triangle');});}
-    else if(name==='lose'){[440,349,294,220].forEach(function(f,i){tone(t+i*0.15,f,f,0.3,0.16,'triangle');});}
-    else if(name==='draw'){[392,392].forEach(function(f,i){tone(t+i*0.17,f,f,0.24,0.15,'triangle');});}
-    else if(name==='undo'){tone(t,540,320,0.11,0.11,'sine');}
-    else if(name==='flip'){tone(t,720,980,0.07,0.07,'sine');}
-    else if(name==='next'){tone(t,600,600,0.07,0.1,'sine');tone(t+0.09,760,760,0.07,0.1,'sine');tone(t+0.18,1010,1010,0.14,0.1,'sine');}
-    else if(name==='illegal'){tone(t,155,110,0.19,0.13,'sawtooth');}
+    if(name==='select'){tone(t,920,920,0.065,0.14,'sine');}
+    else if(name==='move'){tone(t,660,190,0.085,0.28,'triangle');burst(t,0.045,0.12,2400);}
+    else if(name==='capture'){tone(t,300,95,0.17,0.30,'square');burst(t,0.09,0.20,1100);}
+    else if(name==='check'){tone(t,1046,1046,0.1,0.22,'square');tone(t+0.13,1318,1318,0.16,0.22,'square');}
+    else if(name==='win'){[523,659,784,1046].forEach(function(f,i){tone(t+i*0.11,f,f,0.26,0.24,'triangle');});}
+    else if(name==='lose'){[440,349,294,220].forEach(function(f,i){tone(t+i*0.15,f,f,0.32,0.22,'triangle');});}
+    else if(name==='draw'){[392,392].forEach(function(f,i){tone(t+i*0.17,f,f,0.26,0.20,'triangle');});}
+    else if(name==='undo'){tone(t,540,320,0.11,0.15,'sine');}
+    else if(name==='flip'){tone(t,720,980,0.07,0.10,'sine');}
+    else if(name==='next'){tone(t,600,600,0.07,0.14,'sine');tone(t+0.09,760,760,0.07,0.14,'sine');tone(t+0.18,1010,1010,0.14,0.14,'sine');}
+    else if(name==='illegal'){tone(t,155,110,0.19,0.18,'sawtooth');}
   }
 
   /* ---------- 英文语音报棋 ---------- */
@@ -380,17 +415,16 @@ var SND=(function(){
   }
 
   /* ---------- 解锁：iOS/Safari 必须在用户手势里创建并 resume AudioContext ---------- */
+  var nudged=false;
   function ensureAudio(){
-    if(!ctx)init();
+    if(!ctx)init();                     /* init 失败会保持 ctx=null，于是每次点击都会再试一次 */
     if(!ctx)return;
-    if(ctx.state!=='running'){          /* 'suspended' 或 iOS 15+ 的 'interrupted' */
-      try{
-        var pr=ctx.resume();
-        if(pr&&pr.then)pr.then(function(){if(cfg.music&&!document.hidden)startMusic();});
-      }catch(e){}
-    }else if(cfg.music&&!musicRunning&&!document.hidden){
-      startMusic();
-    }
+    var hung=(ctx.state!=='running');   /* 'suspended' 或 iOS 15+ 的 'interrupted' */
+    if(hung){try{ctx.resume();}catch(e){}}
+    if(!nudged||hung){nudged=true;nudge();}
+    /* 关键：不等 resume() 的 Promise。iOS 上 then 回调执行时已经脱离用户手势栈，
+       系统会拒绝在那里启动音频，等它就等于永远不出声 —— 直接同步开排 */
+    if(cfg.music&&!musicRunning&&!document.hidden)startMusic();
   }
   /* 每次交互都复查一次：iPad/iPhone 来电、锁屏、切后台后系统会把 AudioContext 挂起 */
   ['pointerdown','touchstart','touchend','mousedown','keydown','click'].forEach(function(ev){
@@ -418,7 +452,10 @@ var SND=(function(){
       if(cfg.music){ensureAudio();musicGainNow(0.12);}
       else stopMusic();
     }
-    if(kind==='sfx'&&ctx)sfxBus.gain.setTargetAtTime(cfg.sfx?1:0,ctx.currentTime,0.08);
+    if(kind==='sfx'&&ctx){
+      sfxBus.gain.setTargetAtTime(cfg.sfx?1:0,ctx.currentTime,0.08);
+      if(cfg.sfx)fx('next');            /* 打开时响一声，立刻就能确认这台设备出不出声 */
+    }
     if(kind==='voice'&&!cfg.voice&&window.speechSynthesis){
       try{window.speechSynthesis.cancel();}catch(e){}
       duck(false);
@@ -784,6 +821,16 @@ function capPanel(){
   const val=s=>history.filter(h=>h.u.cap&&h.u.cap[0]===s).reduce((a,h)=>a+VAL[typeOf(h.u.cap)],0);
   document.getElementById('mat').textContent='白方吃子价值 '+val(W)+'  |  黑方吃子价值 '+val(B);
 }
+/* iPad / iPhone 专有：侧边静音拨杆会把整个网页音频静音（安卓没有这个开关）。
+   这是系统级行为，代码绕不过去，只能主动提示。点一下可以收起来。 */
+(function(){
+  var ios=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(!ios)return;
+  var el=document.getElementById('iosHint');
+  if(!el)return;
+  el.style.display='block';
+  el.onclick=function(){el.style.display='none';};
+})();
 SND.paint();
 render();
 </script>
