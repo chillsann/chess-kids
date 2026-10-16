@@ -49,6 +49,10 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
 #moves{font-size:12px;color:#7a6a5a;max-height:120px;overflow:auto;line-height:1.7;}
 #tips{font-size:13px;color:#c56a8b;line-height:1.7;}
 .tag{display:inline-block;background:#fff0f5;border-radius:8px;padding:2px 6px;margin:2px;font-size:12px;color:#b56488;}
+.soundbar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
+.soundbar button{background:#b9a7f5;box-shadow:0 4px 0 #8f7bd0;font-size:12px;padding:7px 11px;}
+.soundbar button:active{transform:translateY(3px);box-shadow:0 1px 0 #8f7bd0;}
+.soundbar button.off{background:#d8d3e6;box-shadow:0 4px 0 #b0a9c4;color:#8f88a6;}
 </style>
 </head>
 <body>
@@ -58,6 +62,11 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
   <div class="board-area">
     <div id="status">轮到白方（你）走</div>
     <div class="board" id="board"></div>
+    <div class="soundbar">
+      <button id="sndMusic" onclick="SND.toggle('music')">🎵 音乐</button>
+      <button id="sndSfx" onclick="SND.toggle('sfx')">🔊 音效</button>
+      <button id="sndVoice" onclick="SND.toggle('voice')">🗣️ 英语</button>
+    </div>
     <div class="btns">
       <button class="alt" onclick="newGame()">新的一局</button>
       <button onclick="undo()">悔棋</button>
@@ -107,6 +116,217 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
   </div>
 </div>
 <script>
+/* ==================== 声音引擎（Web Audio 实时合成，无需外部音频文件） ==================== */
+var SND=(function(){
+  var cfg={music:true,sfx:true,voice:true};
+  try{var raw=localStorage.getItem('chesskid_sound');if(raw)Object.assign(cfg,JSON.parse(raw));}catch(e){}
+  function save(){try{localStorage.setItem('chesskid_sound',JSON.stringify(cfg));}catch(e){}}
+
+  var ctx=null,master=null,musicBus=null,sfxBus=null,noise=null,ducked=false,musicTimer=null,musicStart=0,loop=0,idx=0;
+
+  function m2f(m){return 440*Math.pow(2,(m-69)/12);}
+  function init(){
+    if(ctx)return;
+    var AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC)return;
+    try{ctx=new AC();}catch(e){return;}
+    master=ctx.createGain();master.gain.value=0.9;master.connect(ctx.destination);
+    var lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=3200;lp.Q.value=0.7;
+    musicBus=ctx.createGain();musicBus.gain.value=cfg.music?0.5:0;
+    sfxBus=ctx.createGain();sfxBus.gain.value=cfg.sfx?0.9:0;
+    musicBus.connect(lp);lp.connect(master);
+    sfxBus.connect(master);
+    var len=Math.floor(ctx.sampleRate*0.2);
+    noise=ctx.createBuffer(1,len,ctx.sampleRate);
+    var d=noise.getChannelData(0);
+    for(var i=0;i<len;i++)d[i]=Math.random()*2-1;
+  }
+
+  /* ---------- 背景音乐：8 小节循环，C 大调，104 BPM ---------- */
+  var SPB=60/104;
+  var BARS=[
+    [[76,.5],[79,.5],[84,1],[83,.5],[81,.5],[79,1]],
+    [[74,.5],[79,.5],[83,1],[81,.5],[79,.5],[74,1]],
+    [[72,.5],[76,.5],[81,1],[79,.5],[76,.5],[72,1]],
+    [[69,.5],[72,.5],[77,1],[76,.5],[74,.5],[72,1]],
+    [[76,.5],[79,.5],[84,1],[86,.5],[84,.5],[83,1]],
+    [[83,.5],[81,.5],[79,1],[74,.5],[79,.5],[81,1]],
+    [[81,.5],[79,.5],[76,1],[72,.5],[76,.5],[81,1]],
+    [[77,.5],[76,.5],[74,1],[72,2]]
+  ];
+  var BASS=[48,43,45,41,48,43,45,41];
+  var CHORD=[[60,64,67],[59,62,67],[57,60,64],[57,60,65],[60,64,67],[59,62,67],[57,60,64],[57,60,65]];
+  var EVENTS=(function(){
+    var ev=[],t=0;
+    for(var b=0;b<8;b++){
+      var mt=t;
+      for(var k=0;k<BARS[b].length;k++){ev.push({t:mt,dur:BARS[b][k][1]*0.9,midi:BARS[b][k][0],kind:'lead'});mt+=BARS[b][k][1];}
+      ev.push({t:t,dur:4,chord:CHORD[b],kind:'pad'});
+      ev.push({t:t,dur:1.7,midi:BASS[b]-12,kind:'bass'});
+      ev.push({t:t+2,dur:1.7,midi:BASS[b]-12,kind:'bass'});
+      for(var p=0;p<4;p++){
+        ev.push({t:t+p,dur:0.05,kind:'hat'});
+        if(p%2===0)ev.push({t:t+p,dur:0.1,kind:'kick'});
+      }
+      t+=4;
+    }
+    ev.sort(function(a,b){return a.t-b.t;});
+    return ev;
+  })();
+  var LOOP=32,LOOPS=LOOP*SPB;
+
+  function note(when,midi,dur,vol,type,att){
+    var o=ctx.createOscillator(),g=ctx.createGain();
+    o.type=type;o.frequency.setValueAtTime(m2f(midi),when);
+    var a=att||0.01;
+    g.gain.setValueAtTime(0.0001,when);
+    g.gain.linearRampToValueAtTime(vol,when+a);
+    g.gain.exponentialRampToValueAtTime(0.0001,when+dur);
+    o.connect(g);g.connect(musicBus);
+    o.start(when);o.stop(when+dur+0.06);
+  }
+  function kick(when){
+    var o=ctx.createOscillator(),g=ctx.createGain();
+    o.type='sine';o.frequency.setValueAtTime(155,when);
+    o.frequency.exponentialRampToValueAtTime(46,when+0.13);
+    g.gain.setValueAtTime(0.2,when);g.gain.exponentialRampToValueAtTime(0.0001,when+0.17);
+    o.connect(g);g.connect(musicBus);o.start(when);o.stop(when+0.22);
+  }
+  function hat(when){
+    var s=ctx.createBufferSource();s.buffer=noise;
+    var f=ctx.createBiquadFilter();f.type='highpass';f.frequency.value=7200;
+    var g=ctx.createGain();g.gain.setValueAtTime(0.05,when);g.gain.exponentialRampToValueAtTime(0.0001,when+0.045);
+    s.connect(f);f.connect(g);g.connect(musicBus);s.start(when);s.stop(when+0.07);
+  }
+  function playEvent(e,when){
+    if(e.kind==='lead')note(when,e.midi,e.dur,0.085,'square');
+    else if(e.kind==='pad')for(var i=0;i<e.chord.length;i++)note(when,e.chord[i],e.dur*0.98,0.042,'sine',0.55);
+    else if(e.kind==='bass')note(when,e.midi,e.dur*0.92,0.11,'triangle');
+    else if(e.kind==='kick')kick(when);
+    else if(e.kind==='hat')hat(when);
+  }
+  function startMusic(){
+    if(!ctx||musicTimer||!cfg.music)return;
+    musicStart=ctx.currentTime+0.2;loop=0;idx=0;
+    musicTimer=setInterval(function(){
+      if(!ctx)return;
+      var now=ctx.currentTime,guard=0;
+      while(guard++<600){
+        var e=EVENTS[idx],when=musicStart+loop*LOOPS+e.t*SPB;
+        if(when>now+0.25)break;
+        if(when>now-0.06)playEvent(e,when);
+        idx++;if(idx>=EVENTS.length){idx=0;loop++;}
+      }
+    },25);
+  }
+  function stopMusic(){if(musicTimer){clearInterval(musicTimer);musicTimer=null;}}
+  function level(){return cfg.music?(ducked?0.11:0.5):0;}
+  function duck(on){if(!ctx||!musicBus)return;ducked=on;musicBus.gain.setTargetAtTime(level(),ctx.currentTime,0.16);}
+
+  /* ---------- 音效 ---------- */
+  function tone(when,f1,f2,dur,vol,type){
+    var o=ctx.createOscillator(),g=ctx.createGain();
+    o.type=type||'square';o.frequency.setValueAtTime(f1,when);
+    if(f2)o.frequency.exponentialRampToValueAtTime(f2,when+dur*0.92);
+    g.gain.setValueAtTime(0.0001,when);
+    g.gain.linearRampToValueAtTime(vol,when+0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001,when+dur);
+    o.connect(g);g.connect(sfxBus);o.start(when);o.stop(when+dur+0.04);
+  }
+  function burst(when,dur,vol,freq){
+    var s=ctx.createBufferSource();s.buffer=noise;
+    var f=ctx.createBiquadFilter();f.type='bandpass';f.frequency.value=freq||1600;f.Q.value=1.1;
+    var g=ctx.createGain();g.gain.setValueAtTime(vol,when);g.gain.exponentialRampToValueAtTime(0.0001,when+dur);
+    s.connect(f);f.connect(g);g.connect(sfxBus);s.start(when);s.stop(when+dur+0.03);
+  }
+  function fx(name){
+    init();if(!ctx||!cfg.sfx)return;
+    var t=ctx.currentTime+0.012;
+    if(name==='select'){tone(t,920,920,0.065,0.10,'sine');}
+    else if(name==='move'){tone(t,660,190,0.085,0.22,'triangle');burst(t,0.045,0.09,2400);}
+    else if(name==='capture'){tone(t,300,95,0.17,0.24,'square');burst(t,0.09,0.16,1100);}
+    else if(name==='check'){tone(t,1046,1046,0.1,0.17,'square');tone(t+0.13,1318,1318,0.16,0.17,'square');}
+    else if(name==='win'){[523,659,784,1046].forEach(function(f,i){tone(t+i*0.11,f,f,0.24,0.18,'triangle');});}
+    else if(name==='lose'){[440,349,294,220].forEach(function(f,i){tone(t+i*0.15,f,f,0.3,0.16,'triangle');});}
+    else if(name==='draw'){[392,392].forEach(function(f,i){tone(t+i*0.17,f,f,0.24,0.15,'triangle');});}
+    else if(name==='undo'){tone(t,540,320,0.11,0.11,'sine');}
+    else if(name==='flip'){tone(t,720,980,0.07,0.07,'sine');}
+    else if(name==='next'){tone(t,600,600,0.07,0.1,'sine');tone(t+0.09,760,760,0.07,0.1,'sine');tone(t+0.18,1010,1010,0.14,0.1,'sine');}
+    else if(name==='illegal'){tone(t,155,110,0.19,0.13,'sawtooth');}
+  }
+
+  /* ---------- 英文语音报棋 ---------- */
+  var NM={p:'Pawn',n:'Knight',b:'Bishop',r:'Rook',q:'Queen',k:'King'};
+  function say(text){
+    if(!cfg.voice||!text)return;
+    var ss=window.speechSynthesis;
+    if(!ss||!window.SpeechSynthesisUtterance)return;
+    try{
+      ss.cancel();
+      var u=new SpeechSynthesisUtterance(text);
+      u.lang='en-US';u.rate=0.92;u.pitch=1.12;u.volume=1;
+      u.onstart=function(){duck(true);};
+      u.onend=function(){duck(false);};
+      u.onerror=function(){duck(false);};
+      ss.speak(u);
+    }catch(e){}
+  }
+  function sentence(m,mover,cap){
+    var files='abcdefgh';
+    function sq(p){return files[p[1]]+' '+(8-p[0]);}
+    if(m.flag==='castleK')return 'Castle, king side';
+    if(m.flag==='castleQ')return 'Castle, queen side';
+    var s=NM[mover?mover[1]:'p']||'Piece';
+    if(cap)s+=' takes '+NM[cap[1]]+' on '+sq(m.to);
+    else s+=' to '+sq(m.to);
+    if(m.promo)s+=' and becomes a Queen';
+    return s;
+  }
+
+  /* ---------- 解锁与开关 ---------- */
+  function unlock(){
+    init();
+    if(ctx&&ctx.state==='suspended')ctx.resume();
+    if(cfg.music)startMusic();
+    document.removeEventListener('pointerdown',unlock);
+    document.removeEventListener('keydown',unlock);
+    document.removeEventListener('touchstart',unlock);
+  }
+  document.addEventListener('pointerdown',unlock);
+  document.addEventListener('keydown',unlock);
+  document.addEventListener('touchstart',unlock,{passive:true});
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden){stopMusic();if(window.speechSynthesis)try{window.speechSynthesis.cancel();}catch(e){}}
+    else if(cfg.music&&ctx)startMusic();
+  });
+
+  var BTN={music:'sndMusic',sfx:'sndSfx',voice:'sndVoice'};
+  var LABEL={music:'🎵 音乐',sfx:'🔊 音效',voice:'🗣️ 英语'};
+  function paint(){
+    Object.keys(BTN).forEach(function(k){
+      var el=document.getElementById(BTN[k]);if(!el)return;
+      el.textContent=LABEL[k]+(cfg[k]?' 开':' 关');
+      el.className=cfg[k]?'':'off';
+    });
+  }
+  function toggle(kind){
+    cfg[kind]=!cfg[kind];save();
+    if(kind==='music'){if(cfg.music){if(ctx)startMusic();}else stopMusic();if(ctx)musicBus.gain.setTargetAtTime(level(),ctx.currentTime,0.2);}
+    if(kind==='sfx'&&ctx)sfxBus.gain.setTargetAtTime(cfg.sfx?0.9:0,ctx.currentTime,0.08);
+    if(kind==='voice'&&!cfg.voice&&window.speechSynthesis){try{window.speechSynthesis.cancel();duck(false);}catch(e){}}
+    paint();
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',paint);else paint();
+  return {
+    unlock:unlock,toggle:toggle,paint:paint,
+    select:function(){fx('select');},move:function(){fx('move');},capture:function(){fx('capture');},
+    check:function(){fx('check');},win:function(){fx('win');},lose:function(){fx('lose');},draw:function(){fx('draw');},
+    undo:function(){fx('undo');},flip:function(){fx('flip');},next:function(){fx('next');},illegal:function(){fx('illegal');},
+    english:sentence, speak:say
+  };
+})();
+
+/* ==================== 棋局逻辑 ==================== */
 const W='w',B='b';
 const UNI={wk:'♔',wq:'♕',wr:'♖',wb:'♗',wn:'♘',wp:'♙',bk:'♚',bq:'♛',br:'♜',bb:'♝',bn:'♞',bp:'♟'};
 const VAL={p:1,n:3,b:3,r:5,q:9,k:0};
@@ -191,7 +411,7 @@ function negamax(st,depth,alpha,beta){
 function bestMove(st,depth){const moves=legalMoves(st);let bestM=null,bestSc=-Infinity;
   for(const m of moves){const u=applyMove(st,m);const sc=-negamax(st,depth-1,-Infinity,Infinity);unapplyMove(st,u);
     if(sc>bestSc||(sc===bestSc&&Math.random()<0.3)){bestSc=sc;bestM=m;}}return bestM;}
-let state=freshState(),history=[],selected=null,flipped=false,gameOver=false;
+let state=freshState(),history=[],selected=null,flipped=false,gameOver=false,gameResult=null;
 const boardEl=document.getElementById('board');
 function cellFlip(r,c){return flipped?[7-r,7-c]:[r,c];}
 function render(){
@@ -236,7 +456,7 @@ function click(r,c){
     const mv=legal.find(m=>m.from[0]===selected[0]&&m.from[1]===selected[1]&&m.to[0]===r&&m.to[1]===c);
     if(mv){doMove(mv);selected=null;render();afterHuman();return;}
   }
-  if(p&&colorOf(p)===state.turn){selected=[r,c];document.getElementById('tips').textContent=TIPS[typeOf(p)];}
+  if(p&&colorOf(p)===state.turn){selected=[r,c];SND.select();document.getElementById('tips').textContent=TIPS[typeOf(p)];}
   else selected=null;
   render();
 }
@@ -251,12 +471,26 @@ function refreshMoves(){
   box.innerHTML=history.map((h,i)=>((i%2===0)?('<b>'+(Math.floor(i/2)+1)+'.</b> '):'')+h.name).slice(-24).join(' ');
   box.scrollTop=box.scrollHeight;
 }
+function moveFeedback(m,mover,u){
+  const en=SND.english(m,mover,u.cap);
+  let tail='';
+  if(gameOver){
+    if(gameResult&&gameResult.type==='draw'){SND.draw();tail=', draw.';}
+    else if(gameResult&&gameResult.winner===W){SND.win();tail=', checkmate! White wins!';}
+    else {SND.lose();tail=', checkmate! Black wins!';}
+  }else if(inCheck(state,state.turn)){SND.check();tail=', check!';}
+  else if(u.cap)SND.capture();
+  else SND.move();
+  SND.speak(en+tail);
+}
 function doMove(m){
+  const mover=state.board[m.from[0]][m.from[1]];
   const name=notation(m);
   const u=applyMove(state,m);
   history.push({m,u,name,side:u.turn});
   if(m.promo)document.getElementById('tips').textContent='哇！小兵升变成皇后啦，太棒了！';
   refreshMoves();checkGameEnd();
+  moveFeedback(m,mover,u);
 }
 function posKey(st){return st.board.map(row=>row.map(p=>p||'.').join('')).join('/')+'|'+st.turn+'|'+
   (st.castle.wK?'K':'')+(st.castle.wQ?'Q':'')+(st.castle.bK?'k':'')+(st.castle.bQ?'q':'')+'|'+(st.ep?st.ep.join(''):'-');}
@@ -274,10 +508,11 @@ function checkGameEnd(){
   const legal=legalMoves(state);
   if(legal.length===0){
     if(inCheck(state,state.turn)){const winner=state.turn===W?'黑方':'白方';
-      gameOver='太棒啦！'+winner+'获胜（将杀）！点“新的一局”再玩～';}
-    else gameOver='平局啦（逼和），谁也没将死谁，再开一局吧！';
+      gameOver='太棒啦！'+winner+'获胜（将杀）！点“新的一局”再玩～';
+      gameResult={type:'mate',winner:state.turn===W?B:W};}
+    else {gameOver='平局啦（逼和），谁也没将死谁，再开一局吧！';gameResult={type:'draw'};}
     return;}
-  const d=drawReason();if(d)gameOver=d;
+  const d=drawReason();if(d){gameOver=d;gameResult={type:'draw'};}
 }
 function afterHuman(){
   if(gameOver){document.getElementById('status').textContent=gameOver;return;}
@@ -287,10 +522,13 @@ function aiMove(){
   if(gameOver)return;
   const lvl=parseInt(document.getElementById('level').value)||2;
   const m=bestMove(state,lvl+1);
-  if(m){const u=applyMove(state,m);const nm=notation(m);history.push({m,u,name:nm,side:u.turn});
+  if(m){const mover=state.board[m.from[0]][m.from[1]];
+    const nm=notation(m);
+    const u=applyMove(state,m);history.push({m,u,name:nm,side:u.turn});
     refreshMoves();
     if(m.promo)document.getElementById('tips').textContent='电脑的小兵也变成皇后啦，要小心！';
-    checkGameEnd();}
+    checkGameEnd();
+    moveFeedback(m,mover,u);}
   render();
 }
 function undo(){
@@ -298,18 +536,19 @@ function undo(){
   let steps=1;
   if(document.getElementById('mode').value==='ai'&&history.length>=2&&history[history.length-1].side===B)steps=2;
   for(let i=0;i<steps&&history.length;i++){const h=history.pop();unapplyMove(state,h.u);}
-  gameOver=false;selected=null;render();
+  gameOver=false;gameResult=null;selected=null;SND.undo();render();
 }
 function hint(){
   if(gameOver)return;
   const m=bestMove(state,3);
-  if(m){selected=m.from;render();
+  if(m){selected=m.from;SND.select();render();
     document.getElementById('tips').textContent='小助手觉得：把'+UNI[state.board[m.from[0]][m.from[1]]]+'走到'+
     'abcdefgh'[m.to[1]]+(8-m.to[0])+'是个不错的主意～';}
 }
-function newGame(){state=freshState();history=[];selected=null;gameOver=false;flipped=false;
-  document.getElementById('moves').innerHTML='';document.getElementById('tips').textContent='新的一局开始啦，白方先走，加油！';render();}
-function flipBoard(){flipped=!flipped;render();}
+function newGame(){state=freshState();history=[];selected=null;gameOver=false;gameResult=null;flipped=false;
+  document.getElementById('moves').innerHTML='';document.getElementById('tips').textContent='新的一局开始啦，白方先走，加油！';
+  SND.next();render();}
+function flipBoard(){flipped=!flipped;SND.flip();render();}
 function capPanel(){
   const cw=history.filter(h=>h.u.cap&&h.u.cap[0]===W).map(h=>UNI[h.u.cap]).join('');
   const cb=history.filter(h=>h.u.cap&&h.u.cap[0]===B).map(h=>UNI[h.u.cap]).join('');
@@ -317,6 +556,7 @@ function capPanel(){
   const val=s=>history.filter(h=>h.u.cap&&h.u.cap[0]===s).reduce((a,h)=>a+VAL[typeOf(h.u.cap)],0);
   document.getElementById('mat').textContent='白方吃子价值 '+val(W)+'  |  黑方吃子价值 '+val(B);
 }
+SND.paint();
 render();
 </script>
 </body>
