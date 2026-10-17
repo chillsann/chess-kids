@@ -91,9 +91,6 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
 #tips{font-size:13px;color:#c56a8b;line-height:1.7;}
 .tag{display:inline-block;background:#fff0f5;border-radius:8px;padding:2px 6px;margin:2px;font-size:12px;color:#b56488;}
 .soundbar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
-.ioshint{display:none;width:100%;text-align:center;font-size:11px;line-height:1.55;color:#9c7040;
-  background:#fff7e8;border:1px solid #f0dcbb;border-radius:12px;padding:6px 10px;cursor:pointer;}
-.ioshint b{color:#c05621;}
 .soundbar button{background:#b9a7f5;box-shadow:0 4px 0 #8f7bd0;font-size:12px;padding:7px 11px;}
 .soundbar button:active{transform:translateY(3px);box-shadow:0 1px 0 #8f7bd0;}
 .soundbar button.off{background:#d8d3e6;box-shadow:0 4px 0 #b0a9c4;color:#8f88a6;}
@@ -142,7 +139,6 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
       <button id="sndMusic" onclick="SND.toggle('music')">🎹 钢琴曲</button>
       <button id="sndSfx" onclick="SND.toggle('sfx')">🔊 音效</button>
     </div>
-    <div class="ioshint" id="iosHint">🔇 听不到声音？iPad / iPhone 侧边的<b>静音拨杆</b>会把网页音频整个关掉，请先拨到非静音档、并把音量调大。<br>不确定有没有修好？点上面的「🔊 音效」开关，能听到“叮咚”一声就说明正常了。（点这里可以收起提示）</div>
     <div class="btns">
       <button class="alt" onclick="newGame()">新的一局</button>
       <button onclick="undo()">悔棋</button>
@@ -1336,16 +1332,6 @@ function switchGame(key){
     const b=el('gb-'+k);if(b)b.classList.toggle('on',k===key);});
   SND.next();render();
 }
-/* iPad / iPhone 专有：侧边静音拨杆会把整个网页音频静音（安卓没有这个开关）。
-   这是系统级行为，代码绕不过去，只能主动提示。点一下可以收起来。 */
-(function(){
-  var ios=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-  if(!ios)return;
-  var h=el('iosHint');
-  if(!h)return;
-  h.style.display='block';
-  h.onclick=function(){h.style.display='none';};
-})();
 SND.paint();
 switchGame('chess');
 </script>
