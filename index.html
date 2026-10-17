@@ -24,13 +24,16 @@ h1{width:100%;text-align:center;font-size:30px;color:#ff7eb3;text-shadow:2px 2px
 .board-wrap{position:relative;width:min(86vw,460px);padding:0 0 15px 15px;}
 .board-wrap.w-jq{width:min(92vw,540px);}
 .board{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));grid-template-rows:repeat(8,minmax(0,1fr));
-  position:relative;width:100%;aspect-ratio:1;container-type:inline-size;
+  position:relative;z-index:2;width:100%;aspect-ratio:1;min-height:0;container-type:inline-size;
   border:6px solid #fff;border-radius:18px;overflow:hidden;box-shadow:0 10px 24px rgba(120,100,120,.3);}
 .board.g-xq,.board.g-jq{border-color:#c9a06a;}
-.arrows{position:absolute;inset:6px 6px 21px 21px;pointer-events:none;z-index:6;overflow:visible;}
+/* 棋盘线/箭头层：SVG 作为 .board 的绝对定位子元素，显式 100% 尺寸 → 盒子恰好等于格子区，
+   且不参与网格布局；z-index:1 高于格子背景、低于棋子（棋子 z-index:1 但 DOM 更晚），箭头最高 */
+.board .decor,.board .arrows{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;}
+.board .decor{z-index:1;}
+.board .arrows{z-index:6;}
 .arrows line{animation:alin .32s ease both;}
 @keyframes alin{from{opacity:0}to{opacity:1}}
-.decor{position:absolute;inset:6px 6px 21px 21px;pointer-events:none;z-index:1;overflow:visible;}
 .coord-b{position:absolute;left:21px;right:6px;bottom:0;height:15px;display:grid;
   grid-template-columns:repeat(8,1fr);font-size:10px;color:#b09a86;text-align:center;align-items:center;font-weight:bold;}
 .coord-l{position:absolute;left:0;top:6px;bottom:21px;width:15px;display:grid;
@@ -130,9 +133,7 @@ select{padding:8px;border-radius:12px;border:2px solid #ffb3d1;font-family:inher
     <div class="lastmove empty" id="lastMove"><span class="lm-tag">还没有走棋呢</span></div>
     <div class="board-wrap" id="boardWrap">
       <div class="coord-l" id="coordL"></div>
-      <div class="board" id="board"></div>
-      <svg class="decor" id="decor" viewBox="0 0 8 8" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"></svg>
-      <svg class="arrows" id="arrows" viewBox="0 0 8 8" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="board" id="board"><svg class="decor" id="decor" viewBox="0 0 8 8" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"></svg><svg class="arrows" id="arrows" viewBox="0 0 8 8" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"></svg></div>
       <div class="coord-b" id="coordB"></div>
     </div>
     <div class="soundbar">
@@ -823,7 +824,7 @@ const XQ=(function(){
   function sideName(s){return s===R?'红方':'黑方';}
   function moveInfo(st,m){
     const p=st.board[m.from[0]][m.from[1]],side=p[0],t=p[1];
-    const sq=(r,c)=>'abcdefghi'[c]+(10-r);
+    const sq=x=>'abcdefghi'[x[1]]+(10-x[0]);
     const info={side,t,cap:null,from:sq(m.from),to:sq(m.to)};
     const tp=st.board[m.to[0]][m.to[1]];
     if(tp)info.cap=tp;
@@ -1000,7 +1001,7 @@ const JQ=(function(){
   function sideName(s){return s===R?'红方':'蓝方';}
   function moveInfo(st,m){
     const p=st.board[m.from[0]][m.from[1]],side=p[0],t=p[1];
-    const sq=(r,c)=>'abcdefghij'[c]+(6-r);
+    const sq=x=>'abcdefghij'[x[1]]+(6-x[0]);
     const info={side,t,cap:null,from:sq(m.from),to:sq(m.to)};
     const tp=st.board[m.to[0]][m.to[1]];
     info.uni=GLYPH[t];info.name=NAME[t];
@@ -1073,7 +1074,8 @@ function whoName(side){
 function cellFlip(r,c){return flipped?[G.rows-1-r,G.cols-1-c]:[r,c];}
 function visualOf(p){const r=p[0],c=p[1];return flipped?[G.rows-1-r,G.cols-1-c]:[r,c];}
 function render(){
-  boardEl.innerHTML='';
+  boardEl.querySelectorAll('.sq').forEach(function(n){n.remove();});   /* 只清格子，保留棋盘线/箭头层 */
+  boardEl.style.aspectRatio=G.cols+'/'+G.rows;   /* 棋盘高宽比精确跟随棋种，格子保持方正 */
   const legal=gameOver?[]:G.legalMoves(state);
   const from=selected?legal.filter(m=>m.from[0]===selected[0]&&m.from[1]===selected[1]):[];
   const last=history[history.length-1];
@@ -1139,6 +1141,12 @@ function drawDecor(){
   let s='';
   const C=G.cols,Rr=G.rows;
   if(G.key==='xiangqi'){
+    /* 楚河汉界：先画一整条江（浅色水带 + 两条波纹），再画网格线 */
+    let w1='M0 4.74 q 0.225 -0.07 0.45 0',w2='M0 5.26 q 0.225 0.07 0.45 0';
+    for(let i=0;i<19;i++){w1+=' t 0.45 0';w2+=' t 0.45 0';}
+    s+='<rect x="0" y="4.5" width="'+C+'" height="1" fill="#dcebf5" stroke="none"/>';
+    s+='<path d="'+w1+'" fill="none" stroke="#a7c9de" stroke-width="0.02" opacity="0.9"/>';
+    s+='<path d="'+w2+'" fill="none" stroke="#a7c9de" stroke-width="0.02" opacity="0.9"/>';
     for(let r=0;r<Rr;r++){
       if(r===5)continue;                                  /* 楚河汉界之间不画线 */
       s+='<line x1="0.5" y1="'+(r+0.5)+'" x2="'+(C-0.5)+'" y2="'+(r+0.5)+'"/>';
@@ -1157,10 +1165,10 @@ function drawDecor(){
     for(let r=0;r<Rr;r++)s+='<line x1="0.5" y1="'+(r+0.5)+'" x2="'+(C-0.5)+'" y2="'+(r+0.5)+'"/>';
     for(let c=0;c<C;c++)s+='<line x1="'+(c+0.5)+'" y1="0.5" x2="'+(c+0.5)+'" y2="'+(Rr-0.5)+'"/>';
   }
-  decorEl.innerHTML='<g stroke="#c39a5e" stroke-width="0.022" stroke-linecap="round" fill="none">'+s+'</g>'+
+  decorEl.innerHTML='<g stroke="#b3854a" stroke-width="0.03" stroke-linecap="round" fill="none">'+s+'</g>'+
     (G.key==='xiangqi'?
-      '<text x="4.5" y="4.66" text-anchor="middle" dominant-baseline="central" font-size="0.4" fill="#a4763a" font-weight="bold">楚 河</text>'+
-      '<text x="4.5" y="5.34" text-anchor="middle" dominant-baseline="central" font-size="0.4" fill="#a4763a" font-weight="bold">汉 界</text>':'');
+      '<text x="2.25" y="5" text-anchor="middle" dominant-baseline="central" font-size="0.46" letter-spacing="0.08" fill="#8a6a35" font-weight="bold">楚 河</text>'+
+      '<text x="6.75" y="5" text-anchor="middle" dominant-baseline="central" font-size="0.46" letter-spacing="0.08" fill="#8a6a35" font-weight="bold">汉 界</text>':'');
 }
 /* 棋子从起点滑到终点 */
 function flyPiece(f){
